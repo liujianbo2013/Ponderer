@@ -398,5 +398,21 @@
   "ponderer.ui.item_list.nbt_filter": "NBT Filter:",
   "ponderer.ui.item_list.page": "Page %s / %s",
   "ponderer.ui.show_structure.browse": "Browse...",
-  "ponderer.ui.show_structure.browse.tooltip": "Open file explorer to select a .nbt structure file"
+  "ponderer.ui.show_structure.browse.tooltip": "Open file explorer to select a .nbt structure file",
+
+  "ponderer.ui.scene_editor.paste": "Paste Step",
+  "ponderer.ui.scene_editor.hint_undo": "Ctrl+Z undo | Ctrl+Y redo | Click = edit",
+
+  "ponderer.ui.scene_editor.btn.move_up": "Move Up",
+  "ponderer.ui.scene_editor.btn.move_down": "Move Down",
+  "ponderer.ui.scene_editor.btn.insert": "Insert After",
+  "ponderer.ui.scene_editor.btn.copy": "Copy",
+  "ponderer.ui.scene_editor.btn.paste_after": "Paste After",
+  "ponderer.ui.scene_editor.btn.delete": "Delete",
+
+  "ponderer.cmd.export.done": "Ponderer: exported %s files to %s",
+  "ponderer.cmd.export.failed": "Ponderer: export failed: %s",
+  "ponderer.cmd.import.done": "Ponderer: imported %s files from %s",
+  "ponderer.cmd.import.failed": "Ponderer: import failed: %s",
+  "ponderer.cmd.import.not_found": "Ponderer: zip file not found: %s"
 }

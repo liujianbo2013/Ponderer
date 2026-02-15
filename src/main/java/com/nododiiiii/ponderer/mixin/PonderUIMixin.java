@@ -3,7 +3,7 @@ package com.nododiiiii.ponderer.mixin;
 import com.nododiiiii.ponderer.blueprint.BlueprintFeature;
 import com.nododiiiii.ponderer.ponder.SceneRuntime;
 import com.nododiiiii.ponderer.ui.SceneEditorScreen;
-import net.createmod.catnip.gui.ScreenOpener;
+
 import net.createmod.ponder.foundation.PonderScene;
 import net.createmod.ponder.foundation.ui.PonderButton;
 import net.createmod.ponder.foundation.ui.PonderUI;
@@ -53,7 +53,7 @@ public abstract class PonderUIMixin extends Screen {
         editButton.withCallback(() -> {
             var result = SceneRuntime.findBySceneId(active.getId());
             if (result != null) {
-                ScreenOpener.open(new SceneEditorScreen(result.scene(), result.sceneIndex()));
+                Minecraft.getInstance().setScreen(new SceneEditorScreen(result.scene(), result.sceneIndex()));
             }
         });
 

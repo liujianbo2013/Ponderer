@@ -13,12 +13,13 @@ Ponderer 是一个 NeoForge 1.21.1 模组，提供数据驱动的 Ponder 场景�
 
 ### 核心功能
 - 在 `config/ponderer/scripts/` 中使用 JSON DSL 定义场景
-- 游戏内场景编辑器（新增/编辑/删除/排序步骤）
+- 游戏内场景编辑器（新增/编辑/删除/排序/复制粘贴步骤，支持在指定位置插入，Ctrl+Z/Y 撤销重做）
 - 从 `config/ponderer/structures/` 加载自定义结构
-- 默认蓝图载体物品为“纸”，并内置对应引导思索；手持“书与笔”可直接查看示例思索
+- 默认蓝图载体物品为"纸"，并内置对应引导思索；手持"书与笔"可直接查看示例思索
 - 通过 `nbtFilter` 进行 NBT 场景过滤
 - PonderJS 双向转换（导入/导出）
 - 客户端与服务端拉取/推送（含冲突处理）
+- 场景包导入导出（ZIP 格式，方便分享）
 - 物品列表界面展示全部已注册思索物品
 
 ### 命令
@@ -44,6 +45,8 @@ Ponderer 是一个 NeoForge 1.21.1 模组，提供数据驱动的 Ponder 场景�
 - `/ponderer convert to_ponderjs <id>`：将指定场景转换为 PonderJS。
 - `/ponderer convert from_ponderjs all`：将全部 PonderJS 场景导回 Ponderer。
 - `/ponderer convert from_ponderjs <id>`：将指定 PonderJS 场景导回 Ponderer。
+- `/ponderer export [filename]`：将所有脚本和结构导出为 ZIP 文件到 `config/ponderer/`。
+- `/ponderer import <filename>`：从 `config/ponderer/` 中的 ZIP 文件导入脚本和结构。
 
 ### 构建
 ```bash
@@ -69,12 +72,13 @@ Ponderer is a NeoForge 1.21.1 mod that provides data-driven Ponder scene authori
 
 ### Key Features
 - JSON DSL scene definition in `config/ponderer/scripts/`
-- In-game scene editor for add/edit/delete/reorder steps
+- In-game scene editor with copy/paste, insert-at-position, and undo/redo (Ctrl+Z/Y)
 - Custom structure loading from `config/ponderer/structures/`
 - The default blueprint carrier item is `paper`, with a built-in matching guide scene; hold a `writable_book` to view the demo scene directly
 - NBT-based scene filtering via `nbtFilter`
 - PonderJS conversion (to/from)
 - Client-server pull/push with conflict handling
+- Scene pack export/import (ZIP format for easy sharing)
 - Item list UI for all registered ponder items
 
 ### Q&A
@@ -105,6 +109,8 @@ Ponderer is a NeoForge 1.21.1 mod that provides data-driven Ponder scene authori
 - `/ponderer convert to_ponderjs <id>`: Convert one scene to PonderJS.
 - `/ponderer convert from_ponderjs all`: Import all scenes back from PonderJS.
 - `/ponderer convert from_ponderjs <id>`: Import one scene back from PonderJS.
+- `/ponderer export [filename]`: Export all scripts and structures as a ZIP file to `config/ponderer/`.
+- `/ponderer import <filename>`: Import scripts and structures from a ZIP file in `config/ponderer/`.
 
 ### Build
 ```bash

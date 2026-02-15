@@ -42,17 +42,24 @@ public class StepTypeSelectorScreen extends AbstractSimiScreen {
     private final int sceneIndex;
     private final SceneEditorScreen parent;
     private final int pageIndex;
+    /** Index after which to insert the new step. -1 means append. */
+    private final int insertAfterIndex;
 
     public StepTypeSelectorScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
-        this(scene, sceneIndex, parent, 0);
+        this(scene, sceneIndex, parent, 0, -1);
     }
 
     public StepTypeSelectorScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent, int pageIndex) {
+        this(scene, sceneIndex, parent, pageIndex, -1);
+    }
+
+    public StepTypeSelectorScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent, int pageIndex, int insertAfterIndex) {
         super(Component.translatable("ponderer.ui.step_selector"));
         this.scene = scene;
         this.sceneIndex = sceneIndex;
         this.parent = parent;
         this.pageIndex = Math.max(0, Math.min(pageIndex, PAGE_TYPES.length - 1));
+        this.insertAfterIndex = insertAfterIndex;
     }
 
     @Override
@@ -63,11 +70,11 @@ public class StepTypeSelectorScreen extends AbstractSimiScreen {
         super.init();
 
         prevPageButton = new PonderButton(guiLeft + 10, guiTop + 25, 16, 16);
-        prevPageButton.withCallback(() -> Minecraft.getInstance().setScreen(new StepTypeSelectorScreen(scene, sceneIndex, parent, Math.max(0, pageIndex - 1))));
+        prevPageButton.withCallback(() -> Minecraft.getInstance().setScreen(new StepTypeSelectorScreen(scene, sceneIndex, parent, Math.max(0, pageIndex - 1), insertAfterIndex)));
         addRenderableWidget(prevPageButton);
 
         nextPageButton = new PonderButton(guiLeft + W - 26, guiTop + 25, 16, 16);
-        nextPageButton.withCallback(() -> Minecraft.getInstance().setScreen(new StepTypeSelectorScreen(scene, sceneIndex, parent, Math.min(PAGE_TYPES.length - 1, pageIndex + 1))));
+        nextPageButton.withCallback(() -> Minecraft.getInstance().setScreen(new StepTypeSelectorScreen(scene, sceneIndex, parent, Math.min(PAGE_TYPES.length - 1, pageIndex + 1), insertAfterIndex)));
         addRenderableWidget(nextPageButton);
 
         for (int i = 0; i < types.length; i++) {
@@ -123,6 +130,7 @@ public class StepTypeSelectorScreen extends AbstractSimiScreen {
         AbstractStepEditorScreen editor = StepEditorFactory.createAddScreen(type, scene, sceneIndex, parent);
         if (editor != null) {
             editor.setReturnScreen(this);
+            editor.setInsertAfterIndex(insertAfterIndex);
             ScreenOpener.open(editor);
         }
     }

@@ -398,5 +398,21 @@
   "ponderer.ui.item_list.nbt_filter": "NBT \u8fc7\u6ee4:",
   "ponderer.ui.item_list.page": "\u7b2c %s \u9875 / \u5171 %s \u9875",
   "ponderer.ui.show_structure.browse": "\u6d4f\u89c8...",
-  "ponderer.ui.show_structure.browse.tooltip": "\u6253\u5f00\u6587\u4ef6\u7ba1\u7406\u5668\u9009\u62e9 .nbt \u7ed3\u6784\u6587\u4ef6"
+  "ponderer.ui.show_structure.browse.tooltip": "\u6253\u5f00\u6587\u4ef6\u7ba1\u7406\u5668\u9009\u62e9 .nbt \u7ed3\u6784\u6587\u4ef6",
+
+  "ponderer.ui.scene_editor.paste": "\u7c98\u8d34\u6b65\u9aa4",
+  "ponderer.ui.scene_editor.hint_undo": "Ctrl+Z \u64a4\u9500 | Ctrl+Y \u91cd\u505a | \u70b9\u51fb\u884c=\u7f16\u8f91",
+
+  "ponderer.ui.scene_editor.btn.move_up": "\u4e0a\u79fb",
+  "ponderer.ui.scene_editor.btn.move_down": "\u4e0b\u79fb",
+  "ponderer.ui.scene_editor.btn.insert": "\u63d2\u5165",
+  "ponderer.ui.scene_editor.btn.copy": "\u590d\u5236",
+  "ponderer.ui.scene_editor.btn.paste_after": "\u7c98\u8d34",
+  "ponderer.ui.scene_editor.btn.delete": "\u5220\u9664",
+
+  "ponderer.cmd.export.done": "Ponderer: \u5df2\u5bfc\u51fa %s \u4e2a\u6587\u4ef6\u5230 %s",
+  "ponderer.cmd.export.failed": "Ponderer: \u5bfc\u51fa\u5931\u8d25: %s",
+  "ponderer.cmd.import.done": "Ponderer: \u5df2\u4ece %2$s \u5bfc\u5165 %1$s \u4e2a\u6587\u4ef6",
+  "ponderer.cmd.import.failed": "Ponderer: \u5bfc\u5165\u5931\u8d25: %s",
+  "ponderer.cmd.import.not_found": "Ponderer: \u672a\u627e\u5230zip\u6587\u4ef6: %s"
 }

@@ -95,13 +95,12 @@ public class SectionTransformScreen extends AbstractStepEditorScreen {
         Double z = parseDouble(zField.getValue(), "Z");
         if (x == null || y == null || z == null) return null;
 
-        Integer duration = parseInt(durationField.getValue(), UIText.of("ponderer.ui.duration"));
-        if (duration == null) return null;
+        int duration = parseIntOr(durationField.getValue(), 20);
 
         DslScene.DslStep s = new DslScene.DslStep();
         s.type = stepType;
         String link = linkIdField.getValue().trim();
-        if (!link.isEmpty()) s.linkId = link;
+        s.linkId = link.isEmpty() ? "default" : link;
         s.duration = Math.max(0, duration);
 
         if (rotationMode) {

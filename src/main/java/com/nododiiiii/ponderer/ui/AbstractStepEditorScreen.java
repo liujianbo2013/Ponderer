@@ -59,6 +59,9 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
     protected boolean attachKeyFrame = false;
     private BoxWidget keyFrameToggle;
 
+    /** Index after which to insert the new step. -1 means append. */
+    protected int insertAfterIndex = -1;
+
     /** Registered tooltip regions: hover over label area to see description. */
     protected final List<TooltipRegion> tooltipRegions = new ArrayList<>();
 
@@ -94,6 +97,11 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
 
     public AbstractStepEditorScreen setReturnScreen(@Nullable Screen returnScreen) {
         this.returnScreen = returnScreen;
+        return this;
+    }
+
+    public AbstractStepEditorScreen setInsertAfterIndex(int index) {
+        this.insertAfterIndex = index;
         return this;
     }
 
@@ -171,7 +179,7 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
         if (isEditMode()) {
             parent.replaceStepAndSave(editIndex, step);
         } else {
-            parent.addStepAndSave(step);
+            parent.insertStepAndSave(insertAfterIndex, step);
         }
         returnToParent();
     }

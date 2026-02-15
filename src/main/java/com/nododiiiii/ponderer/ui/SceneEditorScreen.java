@@ -1,7 +1,9 @@
 package com.nododiiiii.ponderer.ui;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.nododiiiii.ponderer.ponder.DslScene;
-import com.nododiiiii.ponderer.ponder.SceneRuntime;
+import com.nododiiiii.ponderer.ponder.LocalizedText;
 import com.nododiiiii.ponderer.ponder.SceneStore;
 import net.createmod.catnip.gui.AbstractSimiScreen;
 import net.createmod.catnip.gui.ScreenOpener;
@@ -13,8 +15,10 @@ import net.createmod.ponder.foundation.ui.PonderButton;
 import net.createmod.ponder.foundation.ui.PonderUI;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,18 +26,19 @@ import java.util.Locale;
 
 /**
  * Ponder editor screen - shows all steps in the current scene.
- * Each row has small inline buttons: [^] [v] [x] for move-up, move-down,
- * delete.
+ * Each row has small inline buttons: [^] [v] [x] [+] [C] for move-up, move-down,
+ * delete, insert-after, copy.
  * Click the row text area to edit. Hover to see config details tooltip.
  * "+ Add Step" opens the type selector; "Split" inserts a new scene.
+ * Supports undo/redo via Ctrl+Z / Ctrl+Y.
  */
 public class SceneEditorScreen extends AbstractSimiScreen {
 
     private static final int WINDOW_W = 280;
     private static final int WINDOW_H = 240;
     private static final int STEP_ROW_HEIGHT = 18;
-    /** Width reserved on the right side for inline action buttons */
-    private static final int ACTION_BTN_AREA = 42;
+    /** Width reserved on the right side for inline action buttons: 6 buttons x 14px */
+    private static final int ACTION_BTN_AREA = 84;
     /** Each small inline button width */
     private static final int SMALL_BTN = 14;
 
@@ -44,16 +49,27 @@ public class SceneEditorScreen extends AbstractSimiScreen {
     private static final ResourceLocation ICON_DELETE = ResourceLocation.fromNamespaceAndPath("minecraft",
             "container/beacon/cancel");
 
+    /** Client-side clipboard for copy/paste. Holds a deep-copied step. */
+    private static DslScene.DslStep clipboard = null;
+
+    private static final Gson STEP_GSON = new GsonBuilder()
+        .registerTypeAdapter(LocalizedText.class, new LocalizedText.GsonAdapter())
+        .create();
+
     private final DslScene scene;
     private int sceneIndex;
     private int scrollOffset = 0;
+    private final UndoManager undoManager = new UndoManager();
 
     /** Row index currently hovered by the mouse (text area only), or -1. */
     private int hoveredRow = -1;
-    /** Which action button is hovered: 0=up, 1=down, 2=delete, -1=none */
+    /** Which action button is hovered: 0=up, 1=down, 2=insert, 3=copy, 4=paste, 5=delete, -1=none */
     private int hoveredAction = -1;
+    /** Temp field to track which row the hovered action button belongs to. */
+    private int hoveredActionRow = -1;
 
     private BoxWidget addStepButton;
+    private BoxWidget pasteButton;
     private BoxWidget splitButton;
     private BoxWidget backButton;
     private BoxWidget descButton;
@@ -65,6 +81,12 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         super(Component.translatable("ponderer.ui.scene_editor"));
         this.scene = scene;
         this.sceneIndex = sceneIndex;
+    }
+
+    /* -------- Clipboard helpers -------- */
+
+    private static DslScene.DslStep deepCopy(DslScene.DslStep step) {
+        return STEP_GSON.fromJson(STEP_GSON.toJson(step), DslScene.DslStep.class);
     }
 
     /* -------- Geometry helpers -------- */
@@ -92,10 +114,11 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         setWindowSize(WINDOW_W, WINDOW_H);
         super.init();
 
-        int btnW = 44, btnH = 18;
+        // Bottom bar: 6 buttons (Desc, Add, Paste, Split, Del, Back)
+        int btnW = 38, btnH = 18;
         int btnY = guiTop + WINDOW_H - 45;
-        int gap = 8;
-        int bx = guiLeft + 8;
+        int gap = 6;
+        int bx = guiLeft + 6;
 
         // "Desc" opens the scene description editor
         descButton = new PonderButton(bx, btnY, btnW, btnH);
@@ -103,10 +126,22 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         addRenderableWidget(descButton);
         bx += btnW + gap;
 
-        // "+ Add Step" opens the type-selector popup
+        // "+ Add Step" opens the type-selector popup (append mode)
         addStepButton = new PonderButton(bx, btnY, btnW, btnH);
         addStepButton.withCallback(() -> ScreenOpener.open(new StepTypeSelectorScreen(scene, sceneIndex, this)));
         addRenderableWidget(addStepButton);
+        bx += btnW + gap;
+
+        // "Paste" inserts the clipboard step
+        pasteButton = new PonderButton(bx, btnY, btnW, btnH);
+        pasteButton.withCallback(() -> {
+            if (clipboard != null) {
+                DslScene.DslStep pasted = deepCopy(clipboard);
+                insertStepAndSave(-1, pasted);
+                this.init(Minecraft.getInstance(), this.width, this.height);
+            }
+        });
+        addRenderableWidget(pasteButton);
         bx += btnW + gap;
 
         // "Split" inserts a next_scene step at the end
@@ -121,7 +156,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         addRenderableWidget(deleteSceneButton);
 
         // "Back" - reload Ponder scenes and exit
-        backButton = new PonderButton(guiLeft + WINDOW_W - btnW - 8, btnY, btnW, btnH);
+        backButton = new PonderButton(guiLeft + WINDOW_W - btnW - 6, btnY, btnW, btnH);
         backButton.withCallback(this::reloadAndExit);
         addRenderableWidget(backButton);
 
@@ -160,6 +195,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             newIndex = 0;
         sceneIndex = newIndex;
         scrollOffset = 0;
+        undoManager.clear();
         this.init(Minecraft.getInstance(), this.width, this.height);
     }
 
@@ -249,12 +285,15 @@ public class SceneEditorScreen extends AbstractSimiScreen {
                 String clipped = font.plainSubstrByWidth(label, tr - guiLeft - 12);
                 graphics.drawString(font, clipped, guiLeft + 10, y + 5, textHover ? 0xFFFFFF : 0xDDDDDD);
 
-                // Inline action buttons: [^] [v] [x]
+                // Inline action buttons: [^] [v] [+] [C] [P] [x]
                 int bx = tr + 2;
                 int by = y + 1;
                 drawSmallButton(graphics, bx, by, "^", 0, i, mouseX, mouseY);
                 drawSmallButton(graphics, bx + SMALL_BTN, by, "v", 1, i, mouseX, mouseY);
-                drawSmallButton(graphics, bx + 2 * SMALL_BTN, by, "x", 2, i, mouseX, mouseY);
+                drawSmallButton(graphics, bx + 2 * SMALL_BTN, by, "+", 2, i, mouseX, mouseY);
+                drawSmallButton(graphics, bx + 3 * SMALL_BTN, by, "C", 3, i, mouseX, mouseY);
+                drawSmallButton(graphics, bx + 4 * SMALL_BTN, by, "P", 4, i, mouseX, mouseY);
+                drawSmallButton(graphics, bx + 5 * SMALL_BTN, by, "x", 5, i, mouseX, mouseY);
             }
         }
 
@@ -265,8 +304,8 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             graphics.drawString(font, hint, guiLeft + WINDOW_W - 10 - font.width(hint), guiTop + 8, 0x808080);
         }
 
-        // Footer hint
-        graphics.drawString(font, UIText.of("ponderer.ui.scene_editor.hint"),
+        // Footer hint (undo/redo always shown)
+        graphics.drawString(font, UIText.of("ponderer.ui.scene_editor.hint_undo"),
                 guiLeft + 10, guiTop + WINDOW_H - 20, 0x606060);
     }
 
@@ -285,11 +324,14 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         }
 
         // Button labels
-        int btnHalfW = 22;
+        int btnHalfW = 19;
         graphics.drawCenteredString(font, UIText.of("ponderer.ui.scene_editor.desc"),
                 descButton.getX() + btnHalfW, descButton.getY() + 5, 0xFFFFFF);
         graphics.drawCenteredString(font, UIText.of("ponderer.ui.scene_editor.add"),
                 addStepButton.getX() + btnHalfW, addStepButton.getY() + 5, 0xFFFFFF);
+        graphics.drawCenteredString(font, UIText.of("ponderer.ui.scene_editor.paste"),
+                pasteButton.getX() + btnHalfW, pasteButton.getY() + 5,
+                clipboard != null ? 0xFFFFFF : 0x808080);
         graphics.drawCenteredString(font, UIText.of("ponderer.ui.scene_editor.split"),
                 splitButton.getX() + btnHalfW, splitButton.getY() + 5, 0xFFFFFF);
         graphics.drawCenteredString(font, UIText.of("ponderer.ui.scene_editor.delete_scene"),
@@ -298,6 +340,34 @@ public class SceneEditorScreen extends AbstractSimiScreen {
                 backButton.getX() + btnHalfW, backButton.getY() + 5, 0xFFFFFF);
 
         graphics.pose().popPose();
+
+        // Tooltip for hovered inline action button
+        if (hoveredAction >= 0) {
+            String tooltipKey = switch (hoveredAction) {
+                case 0 -> "ponderer.ui.scene_editor.btn.move_up";
+                case 1 -> "ponderer.ui.scene_editor.btn.move_down";
+                case 2 -> "ponderer.ui.scene_editor.btn.insert";
+                case 3 -> "ponderer.ui.scene_editor.btn.copy";
+                case 4 -> "ponderer.ui.scene_editor.btn.paste_after";
+                case 5 -> "ponderer.ui.scene_editor.btn.delete";
+                default -> null;
+            };
+            if (tooltipKey != null) {
+                String tip = UIText.of(tooltipKey);
+                int tw = font.width(tip) + 8;
+                int tx = mouseX + 10;
+                int ty = mouseY - 14;
+                if (tx + tw > this.width) tx = mouseX - tw - 4;
+                if (ty < 0) ty = mouseY + 16;
+                graphics.pose().pushPose();
+                graphics.pose().translate(0, 0, 600);
+                graphics.fill(tx - 2, ty - 2, tx + tw + 2, ty + 12, 0xF0_100020);
+                graphics.fill(tx - 1, ty - 1, tx + tw + 1, ty + 11, 0xC0_5040a0);
+                graphics.fill(tx, ty, tx + tw, ty + 10, 0xF0_100020);
+                graphics.drawString(font, tip, tx + 4, ty + 1, 0xFF_CCCCCC);
+                graphics.pose().popPose();
+            }
+        }
     }
 
     private void drawSmallButton(GuiGraphics graphics, int x, int y, String label,
@@ -316,7 +386,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         ResourceLocation icon = switch (actionId) {
             case 0 -> ICON_MOVE_UP;
             case 1 -> ICON_MOVE_DOWN;
-            case 2 -> ICON_DELETE;
+            case 5 -> ICON_DELETE;
             default -> null;
         };
 
@@ -324,7 +394,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             graphics.setColor(1.0f, 1.0f, 1.0f, 1.0f);
             graphics.pose().pushPose();
             graphics.pose().translate(0, 0, 500);
-            if (actionId == 2) {
+            if (actionId == 5) {
                 // Delete icon (14x14 fits the button perfectly)
                 graphics.blitSprite(icon, x, y + 1, 14, 14);
             } else {
@@ -336,13 +406,16 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             var font = Minecraft.getInstance().font;
             graphics.pose().pushPose();
             graphics.pose().translate(0, 0, 500);
-            graphics.drawCenteredString(font, label, x + SMALL_BTN / 2, y + 4, 0xFFFFFFFF);
+            int textColor = switch (actionId) {
+                case 2 -> 0xFF_80FF80; // green for insert
+                case 3 -> 0xFF_80C0FF; // blue for copy
+                case 4 -> clipboard != null ? 0xFF_FFD080 : 0xFF_606060; // orange for paste, gray when empty
+                default -> 0xFFFFFFFF;
+            };
+            graphics.drawCenteredString(font, label, x + SMALL_BTN / 2, y + 4, textColor);
             graphics.pose().popPose();
         }
     }
-
-    /** Temp field to track which row the hovered action button belongs to. */
-    private int hoveredActionRow = -1;
 
     /* -------- Input -------- */
 
@@ -356,7 +429,10 @@ public class SceneEditorScreen extends AbstractSimiScreen {
                     switch (hoveredAction) {
                         case 0 -> moveStepUp(hoveredActionRow);
                         case 1 -> moveStepDown(hoveredActionRow);
-                        case 2 -> removeStepAndSave(hoveredActionRow);
+                        case 2 -> openInsertAfter(hoveredActionRow);
+                        case 3 -> copyStep(hoveredActionRow);
+                        case 4 -> pasteAfter(hoveredActionRow);
+                        case 5 -> removeStepAndSave(hoveredActionRow);
                     }
                     return true;
                 }
@@ -390,6 +466,21 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (Screen.hasControlDown()) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                performUndo();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_Y) {
+                performRedo();
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     private void clampScrollOffset(int stepCount) {
         int maxOffset = Math.max(0, stepCount - maxVisible());
         if (scrollOffset > maxOffset) {
@@ -398,6 +489,58 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         if (scrollOffset < 0) {
             scrollOffset = 0;
         }
+    }
+
+    /* -------- Copy / Insert helpers -------- */
+
+    private void copyStep(int index) {
+        List<DslScene.DslStep> steps = getSteps();
+        if (index >= 0 && index < steps.size()) {
+            clipboard = deepCopy(steps.get(index));
+        }
+    }
+
+    private void openInsertAfter(int afterIndex) {
+        ScreenOpener.open(new StepTypeSelectorScreen(scene, sceneIndex, this, 0, afterIndex));
+    }
+
+    private void pasteAfter(int afterIndex) {
+        if (clipboard != null) {
+            DslScene.DslStep pasted = deepCopy(clipboard);
+            insertStepAndSave(afterIndex, pasted);
+            this.init(Minecraft.getInstance(), this.width, this.height);
+        }
+    }
+
+    /* -------- Undo / Redo -------- */
+
+    private void performUndo() {
+        List<DslScene.DslStep> restored = undoManager.undo(getSteps());
+        if (restored != null) {
+            setMutableSteps(restored);
+            saveToFile();
+            this.init(Minecraft.getInstance(), this.width, this.height);
+        }
+    }
+
+    private void performRedo() {
+        List<DslScene.DslStep> restored = undoManager.redo(getSteps());
+        if (restored != null) {
+            setMutableSteps(restored);
+            saveToFile();
+            this.init(Minecraft.getInstance(), this.width, this.height);
+        }
+    }
+
+    /** Replace the step list for the current scene/segment. */
+    private void setMutableSteps(List<DslScene.DslStep> newSteps) {
+        if (scene.scenes != null && !scene.scenes.isEmpty()) {
+            if (sceneIndex >= 0 && sceneIndex < scene.scenes.size()) {
+                scene.scenes.get(sceneIndex).steps = new ArrayList<>(newSteps);
+                return;
+            }
+        }
+        scene.steps = new ArrayList<>(newSteps);
     }
 
     /* -------- Step list helpers -------- */
@@ -539,7 +682,18 @@ public class SceneEditorScreen extends AbstractSimiScreen {
 
     /** Append a new step and save. */
     public void addStepAndSave(DslScene.DslStep newStep) {
-        getMutableSteps().add(newStep);
+        insertStepAndSave(-1, newStep);
+    }
+
+    /** Insert a new step after the given index and save. If afterIndex is -1, append. */
+    public void insertStepAndSave(int afterIndex, DslScene.DslStep newStep) {
+        undoManager.saveState(getSteps());
+        List<DslScene.DslStep> steps = getMutableSteps();
+        if (afterIndex >= 0 && afterIndex < steps.size()) {
+            steps.add(afterIndex + 1, newStep);
+        } else {
+            steps.add(newStep);
+        }
         saveToFile();
     }
 
@@ -547,6 +701,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
     public void replaceStepAndSave(int index, DslScene.DslStep newStep) {
         List<DslScene.DslStep> steps = getMutableSteps();
         if (index >= 0 && index < steps.size()) {
+            undoManager.saveState(getSteps());
             steps.set(index, newStep);
             saveToFile();
         }
@@ -556,6 +711,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
     public void removeStepAndSave(int index) {
         List<DslScene.DslStep> steps = getMutableSteps();
         if (index >= 0 && index < steps.size()) {
+            undoManager.saveState(getSteps());
             steps.remove(index);
             clampScrollOffset(steps.size());
             saveToFile();
@@ -567,6 +723,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
     private void moveStepUp(int index) {
         List<DslScene.DslStep> steps = getMutableSteps();
         if (index > 0 && index < steps.size()) {
+            undoManager.saveState(getSteps());
             DslScene.DslStep temp = steps.get(index);
             steps.set(index, steps.get(index - 1));
             steps.set(index - 1, temp);
@@ -579,6 +736,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
     private void moveStepDown(int index) {
         List<DslScene.DslStep> steps = getMutableSteps();
         if (index >= 0 && index < steps.size() - 1) {
+            undoManager.saveState(getSteps());
             DslScene.DslStep temp = steps.get(index);
             steps.set(index, steps.get(index + 1));
             steps.set(index + 1, temp);
@@ -592,6 +750,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
      * steps.
      */
     private void insertSplitStep() {
+        undoManager.saveState(getSteps());
         int newSceneIndex = -1;
 
         if (scene.scenes != null && !scene.scenes.isEmpty()

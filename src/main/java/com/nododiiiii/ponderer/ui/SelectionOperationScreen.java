@@ -198,9 +198,7 @@ public class SelectionOperationScreen extends AbstractStepEditorScreen {
 
         if (withLinkId) {
             String linkId = linkIdField.getValue().trim();
-            if (!linkId.isEmpty()) {
-                s.linkId = linkId;
-            }
+            s.linkId = linkId.isEmpty() ? "default" : linkId;
         }
 
         return s;

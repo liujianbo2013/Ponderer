@@ -7,11 +7,13 @@ Ponderer 是一个面向玩家与整合包作者的「游戏内思索（Ponder�
 
 - **在游戏内新建思索**：从手持物品或指定物品快速生成新的思索条目（支持不同nbt分别思索，如不同署名的成书）。
 - **可视化编辑步骤**：点击本模组创建的思索左下角编辑图标，即可通过图形界面编辑文本、镜头、方块变化、实体生成、音效等 Ponder 步骤。
+- **复制粘贴与撤销重做**：支持步骤复制/粘贴、在指定位置插入、Ctrl+Z 撤销 / Ctrl+Y 重做。
 - **蓝图选区与结构保存**：使用蓝图工具选择区域并保存结构，便于复用和迭代演示内容。
 - **纸作为默认蓝图载体**：开箱即用，且内置了对应引导思索；手持**书与笔**即可直接查看示例思索。
 - **本地热重载**：编辑后可直接重载，快速查看效果，减少反复重启。
 - **多人协作同步**：支持从服务器拉取与向服务器推送思索内容，方便团队协作维护教程或快速获取其他玩家创建的思索。
 - **格式互转**：支持与 PonderJS 格式互相转换，兼容不同工作流。
+- **场景包导入导出**：支持将所有场景和结构打包为 ZIP 文件，方便在社区分享或备份。
 
 ## 指令总览（用途 + 用法）
 
@@ -37,6 +39,8 @@ Ponderer 是一个面向玩家与整合包作者的「游戏内思索（Ponder�
 - `/ponderer convert to_ponderjs <id>`：将指定场景转换为 PonderJS。
 - `/ponderer convert from_ponderjs all`：将全部 PonderJS 场景导回 Ponderer。
 - `/ponderer convert from_ponderjs <id>`：将指定 PonderJS 场景导回 Ponderer。
+- `/ponderer export [filename]`：将所有脚本和结构导出为 ZIP 文件到 `config/ponderer/`。
+- `/ponderer import <filename>`：从 `config/ponderer/` 中的 ZIP 文件导入脚本和结构。
 
 ## 适合哪些人
 
@@ -79,11 +83,13 @@ You can build, edit, and iterate tutorial scenes directly in Minecraft without l
 
 - **Create scenes in-game**: Quickly create Ponder entries from your held item or a specified item.
 - **Edit steps visually**: Use GUI editors for text, camera, block changes, entity spawning, sounds, and more.
+- **Copy/paste and undo/redo**: Copy/paste steps, insert at any position, undo with Ctrl+Z and redo with Ctrl+Y.
 - **Blueprint selection and structure saving**: Select areas and save structures for fast reuse.
 - **Default blueprint carrier is paper**: Works out of the box with a built-in matching guide scene; hold a **writable_book** to open the demo scene directly.
 - **Hot reload locally**: Reload changes quickly for fast iteration without restart loops.
 - **Multiplayer collaboration sync**: Pull from and push to server-side scene data.
 - **Format conversion**: Convert to and from PonderJS for cross-workflow compatibility.
+- **Scene pack export/import**: Export all scenes and structures as a ZIP file for easy sharing or backup.
 
 ## Command Reference (Purpose + Usage)
 
@@ -109,6 +115,8 @@ You can build, edit, and iterate tutorial scenes directly in Minecraft without l
 - `/ponderer convert to_ponderjs <id>`: Convert one scene to PonderJS.
 - `/ponderer convert from_ponderjs all`: Import all scenes back from PonderJS.
 - `/ponderer convert from_ponderjs <id>`: Import one scene back from PonderJS.
+- `/ponderer export [filename]`: Export all scripts and structures as a ZIP file to `config/ponderer/`.
+- `/ponderer import <filename>`: Import scripts and structures from a ZIP file in `config/ponderer/`.
 
 ## Who this is for
 

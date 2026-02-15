@@ -1,5 +1,6 @@
 package com.nododiiiii.ponderer.ponder;
 
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.nododiiiii.ponderer.network.DownloadStructurePayload;
@@ -19,13 +20,21 @@ import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 import javax.annotation.Nullable;
 
 public final class PondererClientCommands {
@@ -96,6 +105,13 @@ public final class PondererClientCommands {
                             .executes(ctx -> deleteScenesForItem(ResourceLocationArgument.getId(ctx, "item_id"))))))
                 .then(Commands.literal("list")
                     .executes(ctx -> openItemList()))
+                .then(Commands.literal("export")
+                    .executes(ctx -> exportPack(null))
+                    .then(Commands.argument("filename", StringArgumentType.word())
+                        .executes(ctx -> exportPack(StringArgumentType.getString(ctx, "filename")))))
+                .then(Commands.literal("import")
+                    .then(Commands.argument("filename", StringArgumentType.word())
+                        .executes(ctx -> importPack(StringArgumentType.getString(ctx, "filename")))))
         );
     }
 
@@ -493,6 +509,101 @@ public final class PondererClientCommands {
         Minecraft.getInstance().execute(() ->
             net.createmod.catnip.gui.ScreenOpener.transitionTo(new com.nododiiiii.ponderer.ui.PonderItemListScreen()));
         return 1;
+    }
+
+    // ---- /ponderer export / import ----
+
+    private static int exportPack(@Nullable String filename) {
+        if (filename == null || filename.isBlank()) {
+            filename = "ponderer_export_" + LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        }
+        if (!filename.endsWith(".zip")) filename += ".zip";
+
+        Path baseDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("ponderer");
+        Path scriptsDir = SceneStore.getSceneDir();
+        Path structuresDir = SceneStore.getStructureDir();
+        Path outputFile = baseDir.resolve(filename);
+
+        try {
+            Files.createDirectories(baseDir);
+            int count = 0;
+            try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(outputFile))) {
+                if (Files.exists(scriptsDir)) {
+                    try (Stream<Path> paths = Files.walk(scriptsDir)) {
+                        for (Path p : paths.filter(Files::isRegularFile).toList()) {
+                            String entryName = "scripts/" + scriptsDir.relativize(p).toString().replace("\\", "/");
+                            zos.putNextEntry(new ZipEntry(entryName));
+                            Files.copy(p, zos);
+                            zos.closeEntry();
+                            count++;
+                        }
+                    }
+                }
+                if (Files.exists(structuresDir)) {
+                    try (Stream<Path> paths = Files.walk(structuresDir)) {
+                        for (Path p : paths.filter(Files::isRegularFile).toList()) {
+                            String entryName = "structures/" + structuresDir.relativize(p).toString().replace("\\", "/");
+                            zos.putNextEntry(new ZipEntry(entryName));
+                            Files.copy(p, zos);
+                            zos.closeEntry();
+                            count++;
+                        }
+                    }
+                }
+            }
+            notifyClient(Component.translatable("ponderer.cmd.export.done", count, outputFile.getFileName().toString()));
+            return 1;
+        } catch (IOException e) {
+            notifyClient(Component.translatable("ponderer.cmd.export.failed", e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int importPack(String filename) {
+        if (!filename.endsWith(".zip")) filename += ".zip";
+
+        Path baseDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve("ponderer");
+        Path zipFile = baseDir.resolve(filename);
+
+        if (!Files.exists(zipFile)) {
+            notifyClient(Component.translatable("ponderer.cmd.import.not_found", filename));
+            return 0;
+        }
+
+        Path scriptsDir = SceneStore.getSceneDir();
+        Path structuresDir = SceneStore.getStructureDir();
+
+        try {
+            int count = 0;
+            try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipFile))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    String name = entry.getName().replace("\\", "/");
+                    Path target;
+                    if (name.startsWith("scripts/")) {
+                        target = scriptsDir.resolve(name.substring("scripts/".length()));
+                    } else if (name.startsWith("structures/")) {
+                        target = structuresDir.resolve(name.substring("structures/".length()));
+                    } else {
+                        continue;
+                    }
+                    // Security: prevent path traversal
+                    if (!target.normalize().startsWith(baseDir.normalize())) continue;
+                    Files.createDirectories(target.getParent());
+                    Files.copy(zis, target, StandardCopyOption.REPLACE_EXISTING);
+                    count++;
+                }
+            }
+            SceneStore.reloadFromDisk();
+            Minecraft.getInstance().execute(PonderIndex::reload);
+            notifyClient(Component.translatable("ponderer.cmd.import.done", count, filename));
+            return 1;
+        } catch (IOException e) {
+            notifyClient(Component.translatable("ponderer.cmd.import.failed", e.getMessage()));
+            return 0;
+        }
     }
 
     private static void notifyClient(Component message) {

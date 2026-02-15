@@ -6,7 +6,8 @@ import net.minecraft.client.gui.GuiGraphics;
 
 public class SoftHintTextFieldWidget extends HintableTextFieldWidget {
 
-    private static final int SOFT_HINT_COLOR = 0x11111111;
+    /** Dim gray hint color - clearly distinguishable from actual input text. */
+    private static final int SOFT_HINT_COLOR = 0xFF_505050;
 
     public SoftHintTextFieldWidget(Font font, int x, int y, int width, int height) {
         super(font, x, y, width, height);
@@ -14,7 +15,11 @@ public class SoftHintTextFieldWidget extends HintableTextFieldWidget {
 
     @Override
     public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+        // Suppress parent hint rendering by temporarily clearing it
+        String savedHint = this.hint;
+        this.hint = "";
         super.renderWidget(graphics, mouseX, mouseY, partialTicks);
+        this.hint = savedHint;
 
         if (hint == null || hint.isEmpty())
             return;

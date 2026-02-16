@@ -2,6 +2,7 @@ package com.nododiiiii.ponderer.ui;
 
 import com.nododiiiii.ponderer.ponder.DslScene;
 import net.createmod.catnip.config.ui.HintableTextFieldWidget;
+import net.createmod.ponder.foundation.ui.PonderButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -9,7 +10,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class CreateItemEntityScreen extends AbstractStepEditorScreen {
 
@@ -17,6 +20,7 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
     private HintableTextFieldWidget countField;
     private HintableTextFieldWidget posXField, posYField, posZField;
     private HintableTextFieldWidget motionXField, motionYField, motionZField;
+    private PonderButton pickBtnPos;
 
     public CreateItemEntityScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.create_item_entity.add"), scene, sceneIndex, parent);
@@ -35,7 +39,7 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         itemField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.create_item_entity.hint"));
@@ -49,6 +53,7 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
         posXField = createSmallNumberField(x, y, sw, "X");
         posYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         posZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtnPos = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POS1, true);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.create_item_entity.pos"), UIText.of("ponderer.ui.create_item_entity.pos.tooltip"));
         y += 22;
 
@@ -88,6 +93,41 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
         graphics.drawString(font, UIText.of("ponderer.ui.create_item_entity.pos"), lx, y, lc);
         y += 22;
         graphics.drawString(font, UIText.of("ponderer.ui.create_item_entity.motion"), lx, y, lc);
+    }
+
+    @Override
+    protected void renderFormForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+        renderPickButtonLabel(graphics, pickBtnPos);
+    }
+
+    @Override
+    protected String getStepType() { return "create_item_entity"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("item", itemField.getValue());
+        m.put("count", countField.getValue());
+        m.put("posX", posXField.getValue());
+        m.put("posY", posYField.getValue());
+        m.put("posZ", posZField.getValue());
+        m.put("motionX", motionXField.getValue());
+        m.put("motionY", motionYField.getValue());
+        m.put("motionZ", motionZField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("item")) itemField.setValue(snapshot.get("item"));
+        if (snapshot.containsKey("count")) countField.setValue(snapshot.get("count"));
+        if (snapshot.containsKey("posX")) posXField.setValue(snapshot.get("posX"));
+        if (snapshot.containsKey("posY")) posYField.setValue(snapshot.get("posY"));
+        if (snapshot.containsKey("posZ")) posZField.setValue(snapshot.get("posZ"));
+        if (snapshot.containsKey("motionX")) motionXField.setValue(snapshot.get("motionX"));
+        if (snapshot.containsKey("motionY")) motionYField.setValue(snapshot.get("motionY"));
+        if (snapshot.containsKey("motionZ")) motionZField.setValue(snapshot.get("motionZ"));
     }
 
     @Nullable

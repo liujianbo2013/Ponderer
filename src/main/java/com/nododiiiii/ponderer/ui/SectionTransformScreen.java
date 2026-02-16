@@ -7,7 +7,9 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class SectionTransformScreen extends AbstractStepEditorScreen {
 
@@ -83,6 +85,30 @@ public class SectionTransformScreen extends AbstractStepEditorScreen {
         graphics.drawString(font, UIText.of("ponderer.ui." + stepType + ".xyz"), lx, y, lc);
         y += 22;
         graphics.drawString(font, UIText.of("ponderer.ui.duration"), lx, y, lc);
+    }
+
+    @Override
+    protected String getStepType() { return stepType; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("linkId", linkIdField.getValue());
+        m.put("x", xField.getValue());
+        m.put("y", yField.getValue());
+        m.put("z", zField.getValue());
+        m.put("duration", durationField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("linkId")) linkIdField.setValue(snapshot.get("linkId"));
+        if (snapshot.containsKey("x")) xField.setValue(snapshot.get("x"));
+        if (snapshot.containsKey("y")) yField.setValue(snapshot.get("y"));
+        if (snapshot.containsKey("z")) zField.setValue(snapshot.get("z"));
+        if (snapshot.containsKey("duration")) durationField.setValue(snapshot.get("duration"));
     }
 
     @Nullable

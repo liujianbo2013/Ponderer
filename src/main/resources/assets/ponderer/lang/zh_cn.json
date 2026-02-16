@@ -410,6 +410,8 @@
   "ponderer.ui.scene_editor.btn.paste_after": "\u7c98\u8d34",
   "ponderer.ui.scene_editor.btn.delete": "\u5220\u9664",
 
+  "ponderer.ui.pick.tooltip": "\u9009\u70b9",
+
   "ponderer.cmd.export.done": "Ponderer: \u5df2\u5bfc\u51fa %s \u4e2a\u6587\u4ef6\u5230 %s",
   "ponderer.cmd.export.failed": "Ponderer: \u5bfc\u51fa\u5931\u8d25: %s",
   "ponderer.cmd.import.done": "Ponderer: \u5df2\u4ece %2$s \u5bfc\u5165 %1$s \u4e2a\u6587\u4ef6",

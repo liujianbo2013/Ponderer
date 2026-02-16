@@ -13,7 +13,7 @@ Ponderer 是一个 NeoForge 1.21.1 模组，提供数据驱动的 Ponder 场景�
 
 ### 核心功能
 - 在 `config/ponderer/scripts/` 中使用 JSON DSL 定义场景
-- 游戏内场景编辑器（新增/编辑/删除/排序/复制粘贴步骤，支持在指定位置插入，Ctrl+Z/Y 撤销重做）
+- 游戏内场景编辑器（新增/编辑/删除/排序/复制粘贴步骤，支持在指定位置插入，Ctrl+Z/Y 撤销重做，所有坐标字段支持从场景中直接选点）
 - 从 `config/ponderer/structures/` 加载自定义结构
 - 默认蓝图载体物品为"纸"，并内置对应引导思索；手持"书与笔"可直接查看示例思索
 - 通过 `nbtFilter` 进行 NBT 场景过滤
@@ -54,6 +54,11 @@ Ponderer 是一个 NeoForge 1.21.1 模组，提供数据驱动的 Ponder 场景�
 ./gradlew runClient
 ```
 
+### Q&A
+**Q：为什么不直接使用 PonderJS？**
+
+**A：**PonderJS 本身不支持热重载，编辑反馈链路较长；另外，直接传输 JS 脚本也会带来额外安全风险。Ponderer 采用更安全的数据传输方式，同时提供了与 PonderJS 的双向转换能力，方便你在两种工作流之间切换（其中少量接口是 PonderJS 原生暂不支持的）。
+
 ### 许可证
 MIT
 
@@ -72,19 +77,14 @@ Ponderer is a NeoForge 1.21.1 mod that provides data-driven Ponder scene authori
 
 ### Key Features
 - JSON DSL scene definition in `config/ponderer/scripts/`
-- In-game scene editor with copy/paste, insert-at-position, and undo/redo (Ctrl+Z/Y)
+- In-game scene editor (add/edit/delete/reorder/copy-paste steps, insert at any position, Ctrl+Z/Y undo/redo, pick coordinates directly from the scene)
 - Custom structure loading from `config/ponderer/structures/`
 - The default blueprint carrier item is `paper`, with a built-in matching guide scene; hold a `writable_book` to view the demo scene directly
 - NBT-based scene filtering via `nbtFilter`
-- PonderJS conversion (to/from)
+- Bidirectional PonderJS conversion (import/export)
 - Client-server pull/push with conflict handling
 - Scene pack export/import (ZIP format for easy sharing)
 - Item list UI for all registered ponder items
-
-### Q&A
-**Q: Why not use PonderJS directly?**
-
-**A:** PonderJS does not provide hot-reload in this workflow, which makes iteration slower. Directly transmitting JS scripts also introduces additional security risks. Ponderer uses a safer data transfer approach and still provides bidirectional conversion with PonderJS, so you can switch workflows when needed (with a few APIs that are not natively supported by PonderJS).
 
 ### Commands
 - `/ponderer reload`: Reload local scene files and refresh the ponder index.
@@ -119,9 +119,9 @@ Ponderer is a NeoForge 1.21.1 mod that provides data-driven Ponder scene authori
 ```
 
 ### Q&A
-**Q：为什么不直接使用 PonderJS？**
+**Q: Why not use PonderJS directly?**
 
-**A：**PonderJS 本身不支持热重载，编辑反馈链路较长；另外，直接传输 JS 脚本也会带来额外安全风险。Ponderer 采用更安全的数据传输方式，同时提供了与 PonderJS 的双向转换能力，方便你在两种工作流之间切换（其中少量接口是 PonderJS 原生暂不支持的）。
+**A:** PonderJS does not provide hot-reload in this workflow, which makes iteration slower. Directly transmitting JS scripts also introduces additional security risks. Ponderer uses a safer data transfer approach and still provides bidirectional conversion with PonderJS, so you can switch workflows when needed (with a few APIs that are not natively supported by PonderJS).
 
 ### License
 MIT

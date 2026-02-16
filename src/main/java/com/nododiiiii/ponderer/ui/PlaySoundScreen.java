@@ -9,6 +9,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Editor for "play_sound" step.
@@ -96,6 +98,30 @@ public class PlaySoundScreen extends AbstractStepEditorScreen {
         String key = "ponderer.ui.play_sound.source." + value;
         String translated = UIText.of(key);
         return key.equals(translated) ? value : translated;
+    }
+
+    @Override
+    protected String getStepType() { return "play_sound"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("sound", soundField.getValue());
+        m.put("volume", volumeField.getValue());
+        m.put("pitch", pitchField.getValue());
+        m.put("sourceIndex", String.valueOf(sourceIndex));
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("sound")) soundField.setValue(snapshot.get("sound"));
+        if (snapshot.containsKey("volume")) volumeField.setValue(snapshot.get("volume"));
+        if (snapshot.containsKey("pitch")) pitchField.setValue(snapshot.get("pitch"));
+        if (snapshot.containsKey("sourceIndex")) {
+            try { sourceIndex = Integer.parseInt(snapshot.get("sourceIndex")); } catch (NumberFormatException ignored) {}
+        }
     }
 
     @Nullable

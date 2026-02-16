@@ -16,6 +16,7 @@ import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,6 +63,13 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
     /** Index after which to insert the new step. -1 means append. */
     protected int insertAfterIndex = -1;
 
+    /**
+     * If non-null, the form should be restored from this snapshot (after a pick operation).
+     * Set via {@link #setPendingPickRestore(Map)} before the screen is opened.
+     */
+    @Nullable
+    private Map<String, String> pendingPickRestore = null;
+
     /** Registered tooltip regions: hover over label area to see description. */
     protected final List<TooltipRegion> tooltipRegions = new ArrayList<>();
 
@@ -105,6 +113,14 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
         return this;
     }
 
+    /**
+     * Set a form snapshot to restore when the screen initializes (used after coordinate picking).
+     */
+    public AbstractStepEditorScreen setPendingPickRestore(@Nullable Map<String, String> snapshot) {
+        this.pendingPickRestore = snapshot;
+        return this;
+    }
+
     @Override
     protected void init() {
         setWindowSize(WINDOW_W, getWindowHeight());
@@ -134,6 +150,12 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
 
         if (isEditMode()) {
             populateFromStep(existingStep);
+        }
+
+        // If returning from a pick operation, restore the saved form snapshot
+        if (pendingPickRestore != null) {
+            restoreFromSnapshot(pendingPickRestore);
+            pendingPickRestore = null;
         }
     }
 
@@ -363,6 +385,78 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
         tooltipRegions.add(new TooltipRegion(x, y - 1, font.width(label) + 4, 12, tooltip));
     }
 
+    // -- Pick button support --
+
+    /**
+     * Create a small pick button [P] next to an XYZ field group.
+     * When clicked, saves the form state and returns to PonderUI for coordinate picking.
+     *
+     * @param x           button x position
+     * @param y           button y position
+     * @param target      which field group to fill (POS1, POS2, LOOK_AT, POINT)
+     * @param halfOffset  whether to add +0.5 offset (entity/text fields use block center)
+     * @return the pick button widget
+     */
+    protected PonderButton createPickButton(int x, int y, PickState.TargetField target, boolean halfOffset) {
+        PonderButton btn = new PonderButton(x, y + 3, 14, 12);
+        btn.withCallback(() -> {
+            Map<String, String> snapshot = snapshotForm();
+            snapshot.put("_keyFrame", String.valueOf(attachKeyFrame));
+            PickState.startPick(
+                    target,
+                    snapshot,
+                    getStepType(),
+                    editIndex,
+                    insertAfterIndex,
+                    scene,
+                    sceneIndex,
+                    parent,
+                    halfOffset
+            );
+            // Navigate to PonderUI for coordinate picking
+            PickState.openPonderUIForPick();
+        });
+        addRenderableWidget(btn);
+        addTooltip(x, y + 3, 14, 12, UIText.of("ponderer.ui.pick.tooltip"));
+        return btn;
+    }
+
+    /**
+     * Convenience overload for block-coordinate fields (no offset).
+     */
+    protected PonderButton createPickButton(int x, int y, PickState.TargetField target) {
+        return createPickButton(x, y, target, false);
+    }
+
+    /**
+     * Return the step type string for this editor (e.g. "set_block").
+     * Used by PickState to re-create the correct editor screen after picking.
+     */
+    protected abstract String getStepType();
+
+    /**
+     * Capture the current form field values into a string map.
+     * Keys should match those used in {@link #restoreFromSnapshot(Map)}.
+     */
+    protected abstract Map<String, String> snapshotForm();
+
+    /**
+     * Restore form field values from a previously captured snapshot.
+     * Called after returning from a pick operation.
+     */
+    protected abstract void restoreFromSnapshot(Map<String, String> snapshot);
+
+    /**
+     * Helper to restore the keyFrame toggle from a snapshot.
+     * Subclasses should call this in their restoreFromSnapshot().
+     */
+    protected void restoreKeyFrame(Map<String, String> snapshot) {
+        String kf = snapshot.get("_keyFrame");
+        if (kf != null) attachKeyFrame = Boolean.parseBoolean(kf);
+    }
+
+    // -- Field creation helpers --
+
     protected HintableTextFieldWidget createTextField(int x, int y, int w, int h, String hint) {
         var font = Minecraft.getInstance().font;
         HintableTextFieldWidget field = new SoftHintTextFieldWidget(font, x, y, w, h);
@@ -415,6 +509,15 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
         ResourceLocation icon = state ? ICON_CONFIRM : ICON_CANCEL;
         graphics.setColor(1.0f, 1.0f, 1.0f, 1.0f);
         graphics.blitSprite(icon, toggle.getX() + 1, toggle.getY() + 1, 10, 10);
+    }
+
+    /**
+     * Render a "P" label on a pick button. Call this in renderFormForeground().
+     */
+    protected void renderPickButtonLabel(GuiGraphics graphics, PonderButton pickButton) {
+        var font = Minecraft.getInstance().font;
+        graphics.drawCenteredString(font, "+",
+                pickButton.getX() + 7, pickButton.getY() + 2, 0x80FFFF);
     }
 
     @Nullable

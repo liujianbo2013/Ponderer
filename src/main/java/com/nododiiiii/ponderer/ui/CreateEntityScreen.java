@@ -3,6 +3,7 @@ package com.nododiiiii.ponderer.ui;
 import com.nododiiiii.ponderer.ponder.DslScene;
 import net.createmod.catnip.config.ui.HintableTextFieldWidget;
 import net.createmod.catnip.gui.widget.BoxWidget;
+import net.createmod.ponder.foundation.ui.PonderButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -10,7 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class CreateEntityScreen extends AbstractStepEditorScreen {
 
@@ -20,6 +23,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
     private BoxWidget orientModeButton;
     private HintableTextFieldWidget lookAtXField, lookAtYField, lookAtZField;
     private HintableTextFieldWidget yawField, pitchField;
+    private PonderButton pickBtnPos, pickBtnLookAt;
 
     public CreateEntityScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.create_entity.add"), scene, sceneIndex, parent);
@@ -37,7 +41,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         entityField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.create_entity.hint"));
@@ -46,6 +50,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
         posXField = createSmallNumberField(x, y, sw, "X");
         posYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         posZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtnPos = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POS1, true);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.create_entity.pos"), UIText.of("ponderer.ui.create_entity.pos.tooltip"));
         y += 22;
         orientModeButton = createFormButton(x, y, 100);
@@ -56,6 +61,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
         lookAtXField = createSmallNumberField(x, y, sw, "X");
         lookAtYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         lookAtZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtnLookAt = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.LOOK_AT, true);
         yawField = createSmallNumberField(x, y, sw + 15, "0.0");
         pitchField = createSmallNumberField(x + sw + 20, y, sw + 15, "0.0");
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.create_entity.lookat"), UIText.of("ponderer.ui.create_entity.lookat.tooltip"));
@@ -67,6 +73,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
         lookAtXField.visible = !useYawPitch;
         lookAtYField.visible = !useYawPitch;
         lookAtZField.visible = !useYawPitch;
+        pickBtnLookAt.visible = !useYawPitch;
         yawField.visible = useYawPitch;
         pitchField.visible = useYawPitch;
     }
@@ -95,7 +102,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
     @Override
     protected void renderForm(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         var font = Minecraft.getInstance().font;
-        int lx = guiLeft + 10, y = guiTop + 29, lc = 0xCCCCCC, x = guiLeft + 70, sw = 40;
+        int lx = guiLeft + 10, y = guiTop + 29, lc = 0xCCCCCC, x = guiLeft + 70, sw = 38;
 
         graphics.drawString(font, UIText.of("ponderer.ui.create_entity"), lx, y, lc);
         y += 22;
@@ -111,6 +118,43 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
         var font = Minecraft.getInstance().font;
         graphics.drawCenteredString(font, useYawPitch ? UIText.of("ponderer.ui.create_entity.yaw_pitch") : UIText.of("ponderer.ui.create_entity.lookat"),
             orientModeButton.getX() + 50, orientModeButton.getY() + 2, 0xFFFFFF);
+        renderPickButtonLabel(graphics, pickBtnPos);
+        if (!useYawPitch) renderPickButtonLabel(graphics, pickBtnLookAt);
+    }
+
+    @Override
+    protected String getStepType() { return "create_entity"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("entity", entityField.getValue());
+        m.put("posX", posXField.getValue());
+        m.put("posY", posYField.getValue());
+        m.put("posZ", posZField.getValue());
+        m.put("useYawPitch", String.valueOf(useYawPitch));
+        m.put("lookAtX", lookAtXField.getValue());
+        m.put("lookAtY", lookAtYField.getValue());
+        m.put("lookAtZ", lookAtZField.getValue());
+        m.put("yaw", yawField.getValue());
+        m.put("pitch", pitchField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("entity")) entityField.setValue(snapshot.get("entity"));
+        if (snapshot.containsKey("posX")) posXField.setValue(snapshot.get("posX"));
+        if (snapshot.containsKey("posY")) posYField.setValue(snapshot.get("posY"));
+        if (snapshot.containsKey("posZ")) posZField.setValue(snapshot.get("posZ"));
+        if (snapshot.containsKey("useYawPitch")) useYawPitch = Boolean.parseBoolean(snapshot.get("useYawPitch"));
+        if (snapshot.containsKey("lookAtX")) lookAtXField.setValue(snapshot.get("lookAtX"));
+        if (snapshot.containsKey("lookAtY")) lookAtYField.setValue(snapshot.get("lookAtY"));
+        if (snapshot.containsKey("lookAtZ")) lookAtZField.setValue(snapshot.get("lookAtZ"));
+        if (snapshot.containsKey("yaw")) yawField.setValue(snapshot.get("yaw"));
+        if (snapshot.containsKey("pitch")) pitchField.setValue(snapshot.get("pitch"));
+        updateOrientVis();
     }
 
     @Nullable

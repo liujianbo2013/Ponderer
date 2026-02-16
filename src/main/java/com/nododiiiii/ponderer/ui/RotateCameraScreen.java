@@ -7,6 +7,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Map;
 
 public class RotateCameraScreen extends AbstractStepEditorScreen {
 
@@ -47,6 +49,22 @@ public class RotateCameraScreen extends AbstractStepEditorScreen {
         var font = Minecraft.getInstance().font;
         graphics.drawString(font, UIText.of("ponderer.ui.rotate_camera.degrees"), guiLeft + 10, guiTop + FORM_TOP + 3, 0xCCCCCC);
         graphics.drawString(font, UIText.of("ponderer.ui.rotate_camera.degrees.unit"), guiLeft + 136, guiTop + FORM_TOP + 3, 0x808080);
+    }
+
+    @Override
+    protected String getStepType() { return "rotate_camera_y"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("degrees", degreesField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("degrees")) degreesField.setValue(snapshot.get("degrees"));
     }
 
     @Nullable

@@ -2,18 +2,22 @@ package com.nododiiiii.ponderer.ui;
 
 import com.nododiiiii.ponderer.ponder.DslScene;
 import net.createmod.catnip.gui.widget.BoxWidget;
+import net.createmod.ponder.foundation.ui.PonderButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class DestroyBlockScreen extends AbstractStepEditorScreen {
 
     private net.createmod.catnip.config.ui.HintableTextFieldWidget posXField, posYField, posZField;
     private boolean destroyParticles = true;
     private BoxWidget particlesToggle;
+    private PonderButton pickBtn1;
 
     public DestroyBlockScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.destroy_block.add"), scene, sceneIndex, parent);
@@ -36,12 +40,13 @@ public class DestroyBlockScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         posXField = createSmallNumberField(x, y, sw, "X");
         posYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         posZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtn1 = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POS1);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.destroy_block.pos"), UIText.of("ponderer.ui.destroy_block.pos.tooltip"));
 
         y += 22;
@@ -76,6 +81,29 @@ public class DestroyBlockScreen extends AbstractStepEditorScreen {
     @Override
     protected void renderFormForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         renderToggleState(graphics, particlesToggle, destroyParticles);
+        renderPickButtonLabel(graphics, pickBtn1);
+    }
+
+    @Override
+    protected String getStepType() { return "destroy_block"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("posX", posXField.getValue());
+        m.put("posY", posYField.getValue());
+        m.put("posZ", posZField.getValue());
+        m.put("particles", String.valueOf(destroyParticles));
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("posX")) posXField.setValue(snapshot.get("posX"));
+        if (snapshot.containsKey("posY")) posYField.setValue(snapshot.get("posY"));
+        if (snapshot.containsKey("posZ")) posZField.setValue(snapshot.get("posZ"));
+        if (snapshot.containsKey("particles")) destroyParticles = Boolean.parseBoolean(snapshot.get("particles"));
     }
 
     @Nullable

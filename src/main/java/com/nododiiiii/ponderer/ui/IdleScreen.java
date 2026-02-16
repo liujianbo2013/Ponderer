@@ -7,6 +7,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Editor for "idle" step - duration in ticks. */
 public class IdleScreen extends AbstractStepEditorScreen {
@@ -43,6 +45,22 @@ public class IdleScreen extends AbstractStepEditorScreen {
         var font = Minecraft.getInstance().font;
         graphics.drawString(font, UIText.of("ponderer.ui.duration"), guiLeft + 10, guiTop + FORM_TOP + 3, 0xCCCCCC);
         graphics.drawString(font, UIText.of("ponderer.ui.ticks"), guiLeft + 140, guiTop + FORM_TOP + 3, 0x808080);
+    }
+
+    @Override
+    protected String getStepType() { return "idle"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("duration", durationField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("duration")) durationField.setValue(snapshot.get("duration"));
     }
 
     @Nullable

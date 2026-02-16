@@ -9,7 +9,9 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Editor for "show_controls" step.
@@ -28,6 +30,7 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
     private BoxWidget dirButton, actionButton;
     private boolean whileSneaking = false, whileCTRL = false;
     private BoxWidget sneakToggle, ctrlToggle;
+    private PonderButton pickBtnPoint;
 
     public ShowControlsScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.show_controls"), scene, sceneIndex, parent);
@@ -43,12 +46,13 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         pointXField = createSmallNumberField(x, y, sw, "X");
         pointYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         pointZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtnPoint = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POINT, true);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.point"), UIText.of("ponderer.ui.show_controls.point.tooltip"));
         y += 22;
         dirButton = createFormButton(x, y, 100);
@@ -135,12 +139,50 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
         renderToggleState(graphics, sneakToggle, whileSneaking);
         // CTRL toggle
         renderToggleState(graphics, ctrlToggle, whileCTRL);
+        // Pick button label
+        renderPickButtonLabel(graphics, pickBtnPoint);
     }
 
     private String optionLabel(String prefix, String value) {
         String key = prefix + "." + value;
         String translated = UIText.of(key);
         return key.equals(translated) ? value : translated;
+    }
+
+    @Override
+    protected String getStepType() { return "show_controls"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("pointX", pointXField.getValue());
+        m.put("pointY", pointYField.getValue());
+        m.put("pointZ", pointZField.getValue());
+        m.put("duration", durationField.getValue());
+        m.put("item", itemField.getValue());
+        m.put("dirIndex", String.valueOf(dirIndex));
+        m.put("actionIndex", String.valueOf(actionIndex));
+        m.put("whileSneaking", String.valueOf(whileSneaking));
+        m.put("whileCTRL", String.valueOf(whileCTRL));
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("pointX")) pointXField.setValue(snapshot.get("pointX"));
+        if (snapshot.containsKey("pointY")) pointYField.setValue(snapshot.get("pointY"));
+        if (snapshot.containsKey("pointZ")) pointZField.setValue(snapshot.get("pointZ"));
+        if (snapshot.containsKey("duration")) durationField.setValue(snapshot.get("duration"));
+        if (snapshot.containsKey("item")) itemField.setValue(snapshot.get("item"));
+        if (snapshot.containsKey("dirIndex")) {
+            try { dirIndex = Integer.parseInt(snapshot.get("dirIndex")); } catch (NumberFormatException ignored) {}
+        }
+        if (snapshot.containsKey("actionIndex")) {
+            try { actionIndex = Integer.parseInt(snapshot.get("actionIndex")); } catch (NumberFormatException ignored) {}
+        }
+        if (snapshot.containsKey("whileSneaking")) whileSneaking = Boolean.parseBoolean(snapshot.get("whileSneaking"));
+        if (snapshot.containsKey("whileCTRL")) whileCTRL = Boolean.parseBoolean(snapshot.get("whileCTRL"));
     }
 
     @Nullable

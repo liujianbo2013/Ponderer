@@ -6,10 +6,10 @@ Ponderer 是一个面向玩家与整合包作者的「游戏内思索（Ponder�
 ## 你可以用它做什么
 
 - **在游戏内新建思索**：从手持物品或指定物品快速生成新的思索条目（支持不同nbt分别思索，如不同署名的成书）。
-- **可视化编辑步骤**：点击本模组创建的思索左下角编辑图标，即可通过图形界面编辑文本、镜头、方块变化、实体生成、音效等 Ponder 步骤。
+- **可视化编辑步骤**：点击本模组创建的思索左下角编辑图标，即可通过图形界面编辑文本、镜头、方块变化、实体生成、音效等 Ponder 步骤。所有坐标字段均支持从场景中直接选点（左键选取方块坐标，右键选取相邻方块坐标）。
 - **复制粘贴与撤销重做**：支持步骤复制/粘贴、在指定位置插入、Ctrl+Z 撤销 / Ctrl+Y 重做。
-- **蓝图选区与结构保存**：使用蓝图工具选择区域并保存结构，便于复用和迭代演示内容。
-- **纸作为默认蓝图载体**：开箱即用，且内置了对应引导思索；手持**书与笔**即可直接查看示例思索。
+- **蓝图选区与结构保存**：使用蓝图工具（默认为纸）选择区域并保存结构，便于复用和迭代演示内容。
+- **开箱即用**：内置了对应引导思索；手持**书与笔**即可直接查看示例思索。
 - **本地热重载**：编辑后可直接重载，快速查看效果，减少反复重启。
 - **多人协作同步**：支持从服务器拉取与向服务器推送思索内容，方便团队协作维护教程或快速获取其他玩家创建的思索。
 - **格式互转**：支持与 PonderJS 格式互相转换，兼容不同工作流。
@@ -55,17 +55,6 @@ Ponderer 的目标是：
 
 从创建、编辑、预览到同步，整个流程尽量保持在 Minecraft 内完成，让思索内容的制作更快、更直观。
 
-## 版本说明（1.0）
-
-1.0 版本聚焦稳定可用的核心工作流：
-- 场景新建与编辑
-- 结构保存与引用
-- 本地重载
-- 客户端/服务器同步
-- PonderJS 双向转换
-
-如果你想快速上手，建议先在单人世界创建一个简单示例，体验一轮“新建 → 编辑 → 重载 → 同步”的完整流程。
-
 ## Q&A：为什么不直接使用 PonderJS？
 
 PonderJS 在当前流程下无法做到热重载，内容迭代的反馈链路更长；同时，直接传输 JS 脚本也会引入额外的安全隐患。
@@ -81,15 +70,15 @@ You can build, edit, and iterate tutorial scenes directly in Minecraft without l
 
 ## What you can do with it
 
-- **Create scenes in-game**: Quickly create Ponder entries from your held item or a specified item.
-- **Edit steps visually**: Use GUI editors for text, camera, block changes, entity spawning, sounds, and more.
+- **Create scenes in-game**: Quickly create Ponder entries from your held item or a specified item (supports different NBT for separate scenes, e.g. signed books with different authors).
+- **Edit steps visually**: Click the edit icon at the bottom-left of scenes created by this mod to open the GUI editor for text, camera, block changes, entity spawning, sounds, and more. All coordinate fields support picking directly from the scene (left-click to select block coordinates, right-click to select adjacent block coordinates).
 - **Copy/paste and undo/redo**: Copy/paste steps, insert at any position, undo with Ctrl+Z and redo with Ctrl+Y.
-- **Blueprint selection and structure saving**: Select areas and save structures for fast reuse.
-- **Default blueprint carrier is paper**: Works out of the box with a built-in matching guide scene; hold a **writable_book** to open the demo scene directly.
-- **Hot reload locally**: Reload changes quickly for fast iteration without restart loops.
-- **Multiplayer collaboration sync**: Pull from and push to server-side scene data.
+- **Blueprint selection and structure saving**: Use the blueprint tool (default: paper) to select areas and save structures for reuse and iterating demo content.
+- **Works out of the box**: Comes with a built-in guide scene; hold a **writable_book** to view the demo scene directly.
+- **Local hot reload**: Reload changes instantly to see results quickly, without repeated restarts.
+- **Multiplayer collaboration sync**: Pull from and push to server-side scene data, making it easy for teams to collaboratively maintain tutorials or for players to quickly access scenes created by others.
 - **Format conversion**: Convert to and from PonderJS for cross-workflow compatibility.
-- **Scene pack export/import**: Export all scenes and structures as a ZIP file for easy sharing or backup.
+- **Scene pack export/import**: Export all scenes and structures as a ZIP file for easy community sharing or backup.
 
 ## Command Reference (Purpose + Usage)
 
@@ -127,23 +116,12 @@ You can build, edit, and iterate tutorial scenes directly in Minecraft without l
 ## Core experience
 
 Ponderer is built around one goal:
-**turn “writing tutorials” into “building tutorials directly in-game.”**
+**Turn "writing tutorials" into "building tutorials directly in-game."**
 
-From creation and editing to preview and sync, the workflow stays inside Minecraft as much as possible.
-
-## Version note (1.0)
-
-Version 1.0 focuses on a stable core pipeline:
-- Scene creation and editing
-- Structure save and reference
-- Local hot reload
-- Client/server synchronization
-- Bidirectional PonderJS conversion
-
-If you are new, start with a small sample scene and run one full cycle: create → edit → reload → sync.
+From creation and editing to preview and sync, the workflow stays inside Minecraft as much as possible, making Ponder content creation faster and more intuitive.
 
 ## Q&A: Why not use PonderJS directly?
 
-In this workflow, PonderJS does not provide hot-reload, so iteration feedback is slower. Also, directly transmitting JS scripts introduces additional security risks.
+PonderJS does not provide hot-reload in this workflow, which makes iteration feedback slower. Also, directly transmitting JS scripts introduces additional security risks.
 
 Ponderer uses a safer data-transfer approach and still provides bidirectional conversion with PonderJS, so you can switch between workflows when needed (with a few APIs that are not natively supported by PonderJS).

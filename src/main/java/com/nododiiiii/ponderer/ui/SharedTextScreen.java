@@ -9,7 +9,9 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Editor for "shared_text" step.
@@ -29,6 +31,7 @@ public class SharedTextScreen extends AbstractStepEditorScreen {
     private BoxWidget colorButton;
     private boolean placeNearTarget = false;
     private BoxWidget placeToggle;
+    private PonderButton pickBtnPoint;
 
     public SharedTextScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.shared_text"), scene, sceneIndex, parent);
@@ -44,7 +47,7 @@ public class SharedTextScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         keyField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.shared_text.key.hint"));
@@ -53,6 +56,7 @@ public class SharedTextScreen extends AbstractStepEditorScreen {
         pointXField = createSmallNumberField(x, y, sw, "X");
         pointYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         pointZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtnPoint = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POINT, true);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.point"), UIText.of("ponderer.ui.point.tooltip"));
         y += 22;
         durationField = createSmallNumberField(x, y, 50, "60");
@@ -113,12 +117,44 @@ public class SharedTextScreen extends AbstractStepEditorScreen {
         graphics.drawCenteredString(font, colorLabel, colorButton.getX() + 50, colorButton.getY() + 2, colorRgb);
         // Place near toggle
         renderToggleState(graphics, placeToggle, placeNearTarget);
+        // Pick button label
+        renderPickButtonLabel(graphics, pickBtnPoint);
     }
 
     private String colorLabel(String value) {
         String key = "ponderer.ui.color.option." + value;
         String translated = UIText.of(key);
         return key.equals(translated) ? value : translated;
+    }
+
+    @Override
+    protected String getStepType() { return "shared_text"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("key", keyField.getValue());
+        m.put("pointX", pointXField.getValue());
+        m.put("pointY", pointYField.getValue());
+        m.put("pointZ", pointZField.getValue());
+        m.put("duration", durationField.getValue());
+        m.put("colorIndex", String.valueOf(colorIndex));
+        m.put("placeNearTarget", String.valueOf(placeNearTarget));
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("key")) keyField.setValue(snapshot.get("key"));
+        if (snapshot.containsKey("pointX")) pointXField.setValue(snapshot.get("pointX"));
+        if (snapshot.containsKey("pointY")) pointYField.setValue(snapshot.get("pointY"));
+        if (snapshot.containsKey("pointZ")) pointZField.setValue(snapshot.get("pointZ"));
+        if (snapshot.containsKey("duration")) durationField.setValue(snapshot.get("duration"));
+        if (snapshot.containsKey("colorIndex")) {
+            try { colorIndex = Integer.parseInt(snapshot.get("colorIndex")); } catch (NumberFormatException ignored) {}
+        }
+        if (snapshot.containsKey("placeNearTarget")) placeNearTarget = Boolean.parseBoolean(snapshot.get("placeNearTarget"));
     }
 
     @Nullable

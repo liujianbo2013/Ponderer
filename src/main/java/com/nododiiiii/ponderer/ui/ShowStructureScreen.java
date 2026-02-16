@@ -10,6 +10,10 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.PointerBuffer;
+
+import javax.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Map;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
@@ -127,6 +131,24 @@ public class ShowStructureScreen extends AbstractStepEditorScreen {
                 }
             }
         }, Minecraft.getInstance());
+    }
+
+    @Override
+    protected String getStepType() { return "show_structure"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("height", heightField.getValue());
+        m.put("structure", structureField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("height")) heightField.setValue(snapshot.get("height"));
+        if (snapshot.containsKey("structure")) structureField.setValue(snapshot.get("structure"));
     }
 
     @Nullable

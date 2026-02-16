@@ -3,6 +3,7 @@ package com.nododiiiii.ponderer.ui;
 import com.nododiiiii.ponderer.ponder.DslScene;
 import net.createmod.catnip.config.ui.HintableTextFieldWidget;
 import net.createmod.catnip.gui.widget.BoxWidget;
+import net.createmod.ponder.foundation.ui.PonderButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -10,7 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class SetBlockScreen extends AbstractStepEditorScreen {
 
@@ -19,6 +22,7 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
     private HintableTextFieldWidget pos2XField, pos2YField, pos2ZField;
     private boolean spawnParticles = true;
     private BoxWidget particlesToggle;
+    private PonderButton pickBtn1, pickBtn2;
 
     public SetBlockScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.set_block.add"), scene, sceneIndex, parent);
@@ -37,7 +41,7 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
 
     @Override
     protected void buildForm() {
-        int x = guiLeft + 70, y = guiTop + 26, sw = 40;
+        int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
         blockField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.set_block.hint"));
@@ -46,11 +50,13 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
         posXField = createSmallNumberField(x, y, sw, "X");
         posYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         posZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtn1 = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POS1);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.set_block.pos_from"), UIText.of("ponderer.ui.set_block.pos_from.tooltip"));
         y += 22;
         pos2XField = createSmallNumberField(x, y, sw, "X");
         pos2YField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         pos2ZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
+        pickBtn2 = createPickButton(x + 3 * (sw + 5), y, PickState.TargetField.POS2);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.set_block.pos_to"), UIText.of("ponderer.ui.set_block.pos_to.tooltip"));
         y += 22;
         particlesToggle = createToggle(x, y);
@@ -95,6 +101,38 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
     @Override
     protected void renderFormForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         renderToggleState(graphics, particlesToggle, spawnParticles);
+        renderPickButtonLabel(graphics, pickBtn1);
+        renderPickButtonLabel(graphics, pickBtn2);
+    }
+
+    @Override
+    protected String getStepType() { return "set_block"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("block", blockField.getValue());
+        m.put("posX", posXField.getValue());
+        m.put("posY", posYField.getValue());
+        m.put("posZ", posZField.getValue());
+        m.put("pos2X", pos2XField.getValue());
+        m.put("pos2Y", pos2YField.getValue());
+        m.put("pos2Z", pos2ZField.getValue());
+        m.put("particles", String.valueOf(spawnParticles));
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("block")) blockField.setValue(snapshot.get("block"));
+        if (snapshot.containsKey("posX")) posXField.setValue(snapshot.get("posX"));
+        if (snapshot.containsKey("posY")) posYField.setValue(snapshot.get("posY"));
+        if (snapshot.containsKey("posZ")) posZField.setValue(snapshot.get("posZ"));
+        if (snapshot.containsKey("pos2X")) pos2XField.setValue(snapshot.get("pos2X"));
+        if (snapshot.containsKey("pos2Y")) pos2YField.setValue(snapshot.get("pos2Y"));
+        if (snapshot.containsKey("pos2Z")) pos2ZField.setValue(snapshot.get("pos2Z"));
+        if (snapshot.containsKey("particles")) spawnParticles = Boolean.parseBoolean(snapshot.get("particles"));
     }
 
     @Nullable

@@ -7,7 +7,9 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 import javax.annotation.Nullable;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Editor for "encapsulate_bounds" step.
@@ -53,6 +55,26 @@ public class EncapsulateBoundsScreen extends AbstractStepEditorScreen {
         var font = Minecraft.getInstance().font;
         int lx = guiLeft + 10, y = guiTop + 29, lc = 0xCCCCCC;
         graphics.drawString(font, UIText.of("ponderer.ui.encapsulate_bounds.bounds"), lx, y, lc);
+    }
+
+    @Override
+    protected String getStepType() { return "encapsulate_bounds"; }
+
+    @Override
+    protected Map<String, String> snapshotForm() {
+        Map<String, String> m = new HashMap<>();
+        m.put("boundsX", boundsXField.getValue());
+        m.put("boundsY", boundsYField.getValue());
+        m.put("boundsZ", boundsZField.getValue());
+        return m;
+    }
+
+    @Override
+    protected void restoreFromSnapshot(Map<String, String> snapshot) {
+        restoreKeyFrame(snapshot);
+        if (snapshot.containsKey("boundsX")) boundsXField.setValue(snapshot.get("boundsX"));
+        if (snapshot.containsKey("boundsY")) boundsYField.setValue(snapshot.get("boundsY"));
+        if (snapshot.containsKey("boundsZ")) boundsZField.setValue(snapshot.get("boundsZ"));
     }
 
     @Nullable

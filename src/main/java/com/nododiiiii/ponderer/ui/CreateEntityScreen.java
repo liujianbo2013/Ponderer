@@ -24,6 +24,8 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
     private HintableTextFieldWidget lookAtXField, lookAtYField, lookAtZField;
     private HintableTextFieldWidget yawField, pitchField;
     private PonderButton pickBtnPos, pickBtnLookAt;
+    @Nullable
+    private PonderButton jeiBtn;
 
     public CreateEntityScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.create_entity.add"), scene, sceneIndex, parent);
@@ -44,7 +46,8 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
         int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
-        entityField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.create_entity.hint"));
+        entityField = createTextField(x, y, 124, 18, UIText.of("ponderer.ui.create_entity.hint"));
+        jeiBtn = createJeiButton(x + 129, y, entityField, IdFieldMode.ENTITY);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.create_entity"), UIText.of("ponderer.ui.create_entity.tooltip"));
         y += 22;
         posXField = createSmallNumberField(x, y, sw, "X");
@@ -120,6 +123,7 @@ public class CreateEntityScreen extends AbstractStepEditorScreen {
             orientModeButton.getX() + 50, orientModeButton.getY() + 2, 0xFFFFFF);
         renderPickButtonLabel(graphics, pickBtnPos);
         if (!useYawPitch) renderPickButtonLabel(graphics, pickBtnLookAt);
+        renderJeiButtonLabel(graphics, jeiBtn);
     }
 
     @Override

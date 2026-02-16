@@ -23,6 +23,8 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
     private boolean spawnParticles = true;
     private BoxWidget particlesToggle;
     private PonderButton pickBtn1, pickBtn2;
+    @Nullable
+    private PonderButton jeiBtn;
 
     public SetBlockScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.set_block.add"), scene, sceneIndex, parent);
@@ -34,7 +36,10 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
     }
 
     @Override
-    protected int getFormRowCount() { return 4; }
+    protected boolean usesBlockProps() { return true; }
+
+    @Override
+    protected int getFormRowCount() { return 4 + blockPropRowCount(); }
 
     @Override
     protected String getHeaderTitle() { return UIText.of("ponderer.ui.set_block"); }
@@ -44,9 +49,12 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
         int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
-        blockField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.set_block.hint"));
+        blockField = createTextField(x, y, 124, 18, UIText.of("ponderer.ui.set_block.hint"));
+        jeiBtn = createJeiButton(x + 129, y, blockField, IdFieldMode.BLOCK);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.set_block"), UIText.of("ponderer.ui.set_block.tooltip"));
         y += 22;
+        addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.block_properties"), UIText.of("ponderer.ui.block_properties.tooltip"));
+        y = buildBlockPropsUI(x, y);
         posXField = createSmallNumberField(x, y, sw, "X");
         posYField = createSmallNumberField(x + sw + 5, y, sw, "Y");
         posZField = createSmallNumberField(x + 2 * (sw + 5), y, sw, "Z");
@@ -91,6 +99,8 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
 
         graphics.drawString(font, UIText.of("ponderer.ui.set_block"), lx, y, lc);
         y += 22;
+        graphics.drawString(font, UIText.of("ponderer.ui.block_properties"), lx, y, lc);
+        y += blockPropRowCount() * 22;
         graphics.drawString(font, UIText.of("ponderer.ui.set_block.pos_from"), lx, y, lc);
         y += 22;
         graphics.drawString(font, UIText.of("ponderer.ui.set_block.pos_to"), lx, y, lc);
@@ -103,6 +113,8 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
         renderToggleState(graphics, particlesToggle, spawnParticles);
         renderPickButtonLabel(graphics, pickBtn1);
         renderPickButtonLabel(graphics, pickBtn2);
+        renderJeiButtonLabel(graphics, jeiBtn);
+        renderBlockPropsForeground(graphics);
     }
 
     @Override
@@ -110,8 +122,10 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
 
     @Override
     protected Map<String, String> snapshotForm() {
+        syncBlockPropFieldsToEntries();
         Map<String, String> m = new HashMap<>();
         m.put("block", blockField.getValue());
+        snapshotBlockProps(m);
         m.put("posX", posXField.getValue());
         m.put("posY", posYField.getValue());
         m.put("posZ", posZField.getValue());
@@ -126,6 +140,7 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
     protected void restoreFromSnapshot(Map<String, String> snapshot) {
         restoreKeyFrame(snapshot);
         if (snapshot.containsKey("block")) blockField.setValue(snapshot.get("block"));
+        restoreBlockProps(snapshot);
         if (snapshot.containsKey("posX")) posXField.setValue(snapshot.get("posX"));
         if (snapshot.containsKey("posY")) posYField.setValue(snapshot.get("posY"));
         if (snapshot.containsKey("posZ")) posZField.setValue(snapshot.get("posZ"));
@@ -171,6 +186,7 @@ public class SetBlockScreen extends AbstractStepEditorScreen {
         DslScene.DslStep s = new DslScene.DslStep();
         s.type = "set_block";
         s.block = blockId;
+        s.blockProperties = collectBlockProperties();
         s.blockPos = List.of(px, py, pz);
         if (hasPos2) s.blockPos2 = List.of(px2, py2, pz2);
         if (!spawnParticles) s.spawnParticles = false;

@@ -12,6 +12,7 @@ repositories {
     mavenLocal()
     maven { url = "https://raw.githubusercontent.com/Fuzss/modresources/main/maven/" }
     maven { url = "https://maven.createmod.net" }
+    maven { url = "https://maven.blamejared.com" }
 }
 
 base {
@@ -123,6 +124,10 @@ dependencies {
     compileOnly("net.createmod.ponder:Ponder-NeoForge-${minecraft_version}:${ponder_version}")
     // Flywheel API - required by Ponder
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${flywheel_minecraft_version}:${flywheel_version}")
+
+    // JEI API - compile-only, soft dependency
+    compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
+    compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}")
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

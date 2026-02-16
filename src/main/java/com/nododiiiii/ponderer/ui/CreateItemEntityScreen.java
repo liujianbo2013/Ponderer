@@ -21,6 +21,8 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
     private HintableTextFieldWidget posXField, posYField, posZField;
     private HintableTextFieldWidget motionXField, motionYField, motionZField;
     private PonderButton pickBtnPos;
+    @Nullable
+    private PonderButton jeiBtn;
 
     public CreateItemEntityScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.create_item_entity.add"), scene, sceneIndex, parent);
@@ -42,7 +44,8 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
         int x = guiLeft + 70, y = guiTop + 26, sw = 38;
         int lx = guiLeft + 10;
 
-        itemField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.create_item_entity.hint"));
+        itemField = createTextField(x, y, 124, 18, UIText.of("ponderer.ui.create_item_entity.hint"));
+        jeiBtn = createJeiButton(x + 129, y, itemField, IdFieldMode.ITEM);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.create_item_entity.item"), UIText.of("ponderer.ui.create_item_entity.item.tooltip"));
         y += 22;
 
@@ -98,6 +101,7 @@ public class CreateItemEntityScreen extends AbstractStepEditorScreen {
     @Override
     protected void renderFormForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         renderPickButtonLabel(graphics, pickBtnPos);
+        renderJeiButtonLabel(graphics, jeiBtn);
     }
 
     @Override

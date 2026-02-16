@@ -1,5 +1,6 @@
 package com.nododiiiii.ponderer.ui;
 
+import com.nododiiiii.ponderer.compat.jei.JeiCompat;
 import com.nododiiiii.ponderer.ponder.DslScene;
 import net.createmod.catnip.config.ui.HintableTextFieldWidget;
 import net.createmod.catnip.gui.AbstractSimiScreen;
@@ -63,6 +64,27 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
     /** Index after which to insert the new step. -1 means append. */
     protected int insertAfterIndex = -1;
 
+    // -- Block property list state (used by screens that override usesBlockProps) --
+    @Nullable
+    protected List<String[]> blockPropEntries;
+    @Nullable
+    protected List<HintableTextFieldWidget[]> blockPropFields;
+    @Nullable
+    protected List<PonderButton> blockPropRemoveBtns;
+    @Nullable
+    protected PonderButton blockPropAddBtn;
+
+    private boolean initialPopulateDone = false;
+    @Nullable
+    private Map<String, String> pendingReinitRestore = null;
+
+    // -- JEI integration state --
+    private boolean jeiActive = false;
+    @Nullable
+    private HintableTextFieldWidget jeiTargetField = null;
+    @Nullable
+    private IdFieldMode jeiMode = null;
+
     /**
      * If non-null, the form should be restored from this snapshot (after a pick operation).
      * Set via {@link #setPendingPickRestore(Map)} before the screen is opened.
@@ -123,6 +145,9 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
 
     @Override
     protected void init() {
+        if (usesBlockProps()) {
+            preExtractBlockProps();
+        }
         setWindowSize(WINDOW_W, getWindowHeight());
         super.init();
         tooltipRegions.clear();
@@ -148,14 +173,23 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
 
         buildForm();
 
-        if (isEditMode()) {
-            populateFromStep(existingStep);
+        if (!initialPopulateDone) {
+            if (isEditMode()) {
+                populateFromStep(existingStep);
+            }
+
+            // If returning from a pick operation, restore the saved form snapshot
+            if (pendingPickRestore != null) {
+                restoreFromSnapshot(pendingPickRestore);
+                pendingPickRestore = null;
+            }
+            initialPopulateDone = true;
         }
 
-        // If returning from a pick operation, restore the saved form snapshot
-        if (pendingPickRestore != null) {
-            restoreFromSnapshot(pendingPickRestore);
-            pendingPickRestore = null;
+        // After reinit (add/remove prop entry), restore non-prop field values
+        if (pendingReinitRestore != null) {
+            restoreFromSnapshot(pendingReinitRestore);
+            pendingReinitRestore = null;
         }
     }
 
@@ -520,6 +554,78 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
                 pickButton.getX() + 7, pickButton.getY() + 2, 0x80FFFF);
     }
 
+    // -- JEI integration --
+
+    /** Public getters for JEI compat layer (IGuiProperties). */
+    public int getGuiLeft() { return guiLeft; }
+    public int getGuiTop() { return guiTop; }
+    public int getGuiWidth() { return WINDOW_W; }
+    public int getGuiHeight() { return getWindowHeight(); }
+
+    /** Returns the text field that should receive the JEI-selected ID. */
+    @Nullable
+    public HintableTextFieldWidget getJeiTargetField() {
+        return jeiTargetField;
+    }
+
+    /** Deactivate JEI overlay (called after successful selection). */
+    public void deactivateJei() {
+        jeiActive = false;
+        jeiTargetField = null;
+        jeiMode = null;
+        JeiCompat.clearActiveEditor();
+    }
+
+    /** Show an error message when an incompatible item is clicked in JEI. */
+    public void showJeiIncompatibleWarning(IdFieldMode mode) {
+        errorMessage = switch (mode) {
+            case BLOCK -> UIText.of("ponderer.ui.jei.error.not_block");
+            case ENTITY -> UIText.of("ponderer.ui.jei.error.not_spawn_egg");
+            case ITEM -> null;
+        };
+    }
+
+    /**
+     * Create a JEI browse button next to an ID text field.
+     * Returns null if JEI is not installed (button won't be shown).
+     */
+    @Nullable
+    protected PonderButton createJeiButton(int x, int y,
+            HintableTextFieldWidget targetField, IdFieldMode mode) {
+        if (!JeiCompat.isAvailable()) return null;
+
+        PonderButton btn = new PonderButton(x, y + 3, 14, 12);
+        btn.withCallback(() -> {
+            if (jeiActive) {
+                deactivateJei();
+            } else {
+                jeiActive = true;
+                jeiTargetField = targetField;
+                jeiMode = mode;
+                JeiCompat.setActiveEditor(this, mode);
+            }
+        });
+        addRenderableWidget(btn);
+        addTooltip(x, y + 3, 14, 12, UIText.of("ponderer.ui.jei_browse.tooltip"));
+        return btn;
+    }
+
+    /** Render a "J" label on a JEI button. Call in renderFormForeground(). */
+    protected void renderJeiButtonLabel(GuiGraphics graphics, @Nullable PonderButton btn) {
+        if (btn == null) return;
+        var font = Minecraft.getInstance().font;
+        int color = jeiActive ? 0x55FF55 : 0xAAAAFF;
+        graphics.drawCenteredString(font, "J", btn.getX() + 7, btn.getY() + 2, color);
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        if (jeiActive) {
+            deactivateJei();
+        }
+    }
+
     @Nullable
     protected Double parseDouble(String value, String fieldName) {
         if (value == null || value.trim().isEmpty()) {
@@ -571,6 +677,164 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
             return fallback;
+        }
+    }
+
+    // -- Block property list support --
+
+    /** Override to return true if this editor uses the dynamic block property list. */
+    protected boolean usesBlockProps() { return false; }
+
+    /** Number of form rows occupied by block prop entries + add button. */
+    protected int blockPropRowCount() {
+        return blockPropEntries == null ? 0 : blockPropEntries.size() + 1;
+    }
+
+    private void preExtractBlockProps() {
+        if (blockPropEntries != null) return;
+
+        if (isEditMode() && existingStep != null
+                && existingStep.blockProperties != null && !existingStep.blockProperties.isEmpty()) {
+            blockPropEntries = new ArrayList<>();
+            for (var entry : existingStep.blockProperties.entrySet()) {
+                blockPropEntries.add(new String[]{entry.getKey(), entry.getValue()});
+            }
+            return;
+        }
+
+        if (pendingPickRestore != null && pendingPickRestore.containsKey("prop_count")) {
+            int count = Integer.parseInt(pendingPickRestore.get("prop_count"));
+            blockPropEntries = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                blockPropEntries.add(new String[]{
+                        pendingPickRestore.getOrDefault("prop_key_" + i, ""),
+                        pendingPickRestore.getOrDefault("prop_val_" + i, "")
+                });
+            }
+            if (blockPropEntries.isEmpty()) blockPropEntries.add(new String[]{"", ""});
+            return;
+        }
+
+        blockPropEntries = new ArrayList<>();
+        blockPropEntries.add(new String[]{"", ""});
+    }
+
+    /**
+     * Build block property list widgets at the given position.
+     * Returns the Y coordinate for the next form row below the add button.
+     */
+    protected int buildBlockPropsUI(int x, int y) {
+        blockPropFields = new ArrayList<>();
+        blockPropRemoveBtns = new ArrayList<>();
+        int keyW = 55, valW = 55;
+        int valX = x + keyW + 14;  // 14px gap for "=" label
+        int rmX = x + 129;         // align with J / pick buttons
+        int addW = 140;             // spans full row (x+3 to x+143)
+
+        for (int i = 0; i < blockPropEntries.size(); i++) {
+            String[] entry = blockPropEntries.get(i);
+            HintableTextFieldWidget keyField = createTextField(x, y, keyW, 18, "facing");
+            HintableTextFieldWidget valField = createTextField(valX, y, valW, 18, "north");
+            keyField.setValue(entry[0]);
+            valField.setValue(entry[1]);
+
+            PonderButton rmBtn = new PonderButton(rmX, y + 3, 14, 12);
+            final int idx = i;
+            rmBtn.withCallback(() -> removeBlockPropEntry(idx));
+            addRenderableWidget(rmBtn);
+
+            blockPropFields.add(new HintableTextFieldWidget[]{keyField, valField});
+            blockPropRemoveBtns.add(rmBtn);
+            y += ROW_HEIGHT;
+        }
+
+        blockPropAddBtn = new PonderButton(x + 3, y + 3, addW, 12);
+        blockPropAddBtn.withCallback(this::addBlockPropEntry);
+        addRenderableWidget(blockPropAddBtn);
+        y += ROW_HEIGHT;
+
+        return y;
+    }
+
+    private void addBlockPropEntry() {
+        syncBlockPropFieldsToEntries();
+        blockPropEntries.add(new String[]{"", ""});
+        blockPropFields = null;
+        pendingReinitRestore = snapshotForm();
+        init(minecraft, width, height);
+    }
+
+    private void removeBlockPropEntry(int idx) {
+        syncBlockPropFieldsToEntries();
+        blockPropEntries.remove(idx);
+        if (blockPropEntries.isEmpty()) blockPropEntries.add(new String[]{"", ""});
+        blockPropFields = null;
+        pendingReinitRestore = snapshotForm();
+        init(minecraft, width, height);
+    }
+
+    protected void syncBlockPropFieldsToEntries() {
+        if (blockPropFields == null || blockPropEntries == null) return;
+        for (int i = 0; i < blockPropFields.size() && i < blockPropEntries.size(); i++) {
+            blockPropEntries.get(i)[0] = blockPropFields.get(i)[0].getValue();
+            blockPropEntries.get(i)[1] = blockPropFields.get(i)[1].getValue();
+        }
+    }
+
+    /** Collect block property entries into a Map for the DslStep. */
+    @Nullable
+    protected Map<String, String> collectBlockProperties() {
+        syncBlockPropFieldsToEntries();
+        if (blockPropEntries == null) return null;
+        Map<String, String> map = new HashMap<>();
+        for (String[] entry : blockPropEntries) {
+            String key = entry[0].trim();
+            String val = entry[1].trim();
+            if (!key.isEmpty() && !val.isEmpty()) {
+                map.put(key, val);
+            }
+        }
+        return map.isEmpty() ? null : map;
+    }
+
+    /** Save block prop entries into a snapshot map. */
+    protected void snapshotBlockProps(Map<String, String> m) {
+        if (blockPropEntries == null) return;
+        m.put("prop_count", String.valueOf(blockPropEntries.size()));
+        for (int i = 0; i < blockPropEntries.size(); i++) {
+            m.put("prop_key_" + i, blockPropEntries.get(i)[0]);
+            m.put("prop_val_" + i, blockPropEntries.get(i)[1]);
+        }
+    }
+
+    /** Restore block prop field widget values from a snapshot. */
+    protected void restoreBlockProps(Map<String, String> snapshot) {
+        if (blockPropFields == null || !snapshot.containsKey("prop_count")) return;
+        int count = Integer.parseInt(snapshot.get("prop_count"));
+        for (int i = 0; i < count && i < blockPropFields.size(); i++) {
+            blockPropFields.get(i)[0].setValue(snapshot.getOrDefault("prop_key_" + i, ""));
+            blockPropFields.get(i)[1].setValue(snapshot.getOrDefault("prop_val_" + i, ""));
+        }
+    }
+
+    /** Render "=" labels and button text for block prop list. Call in renderFormForeground. */
+    protected void renderBlockPropsForeground(GuiGraphics graphics) {
+        var font = Minecraft.getInstance().font;
+        if (blockPropFields != null) {
+            for (HintableTextFieldWidget[] kv : blockPropFields) {
+                int eqX = kv[0].getX() + kv[0].getWidth() + 3;
+                int eqY = kv[0].getY() + 5;
+                graphics.drawString(font, "=", eqX, eqY, 0xCCCCCC);
+            }
+        }
+        if (blockPropRemoveBtns != null) {
+            for (PonderButton rmBtn : blockPropRemoveBtns) {
+                graphics.drawCenteredString(font, "x", rmBtn.getX() + 7, rmBtn.getY() + 2, 0xFF5555);
+            }
+        }
+        if (blockPropAddBtn != null) {
+            int cx = blockPropAddBtn.getX() + blockPropAddBtn.getWidth() / 2;
+            graphics.drawCenteredString(font, "+", cx, blockPropAddBtn.getY() + 2, 0x80FF80);
         }
     }
 }

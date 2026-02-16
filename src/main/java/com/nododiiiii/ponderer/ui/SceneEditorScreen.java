@@ -297,11 +297,11 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             }
         }
 
-        // Scroll indicator
+        // Scroll indicator (right-aligned on the redo hint line)
         if (steps.size() > maxVisible()) {
             String hint = "(" + (scrollOffset + 1) + "-"
                     + Math.min(scrollOffset + maxVisible(), steps.size()) + " / " + steps.size() + ")";
-            graphics.drawString(font, hint, guiLeft + WINDOW_W - 10 - font.width(hint), guiTop + 8, 0x808080);
+            graphics.drawString(font, hint, guiLeft + WINDOW_W - 10 - font.width(hint), guiTop + WINDOW_H - 20, 0x808080);
         }
 
         // Footer hint (undo/redo always shown)

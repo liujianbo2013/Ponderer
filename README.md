@@ -21,6 +21,9 @@ Ponderer 是一个 NeoForge 1.21.1 模组，提供数据驱动的 Ponder 场景�
 - 客户端与服务端拉取/推送（含冲突处理）
 - 场景包导入导出（ZIP 格式，方便分享）
 - 物品列表界面展示全部已注册思索物品
+- JEI 集成：所有 ID 输入框支持从 JEI 点击或拖放物品自动填入（可选依赖）
+- 方块状态属性：放置/替换方块时可指定 BlockState 属性（如 facing、half 等）
+- 扩展实体解析：船、矿车、盔甲架等物品类实体可通过 JEI 直接拖入实体字段
 
 ### 命令
 - `/ponderer reload`：重载本地场景脚本并刷新思索索引。
@@ -85,6 +88,9 @@ Ponderer is a NeoForge 1.21.1 mod that provides data-driven Ponder scene authori
 - Client-server pull/push with conflict handling
 - Scene pack export/import (ZIP format for easy sharing)
 - Item list UI for all registered ponder items
+- JEI integration: click or drag-drop items from JEI to fill in ID fields (optional dependency)
+- Block state properties: specify BlockState properties (e.g. facing, half) when placing/replacing blocks
+- Extended entity resolution: boats, minecarts, armor stands can be dragged into entity fields via JEI
 
 ### Commands
 - `/ponderer reload`: Reload local scene files and refresh the ponder index.

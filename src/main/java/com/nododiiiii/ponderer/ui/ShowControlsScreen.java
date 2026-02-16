@@ -31,6 +31,8 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
     private boolean whileSneaking = false, whileCTRL = false;
     private BoxWidget sneakToggle, ctrlToggle;
     private PonderButton pickBtnPoint;
+    @Nullable
+    private PonderButton jeiBtn;
 
     public ShowControlsScreen(DslScene scene, int sceneIndex, SceneEditorScreen parent) {
         super(Component.translatable("ponderer.ui.show_controls"), scene, sceneIndex, parent);
@@ -68,7 +70,8 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
         addRenderableWidget(actionButton);
         addLabelTooltip(lx, y + 1, UIText.of("ponderer.ui.show_controls.action"), UIText.of("ponderer.ui.show_controls.action.tooltip"));
         y += 22;
-        itemField = createTextField(x, y, 140, 18, UIText.of("ponderer.ui.show_controls.item.hint"));
+        itemField = createTextField(x, y, 124, 18, UIText.of("ponderer.ui.show_controls.item.hint"));
+        jeiBtn = createJeiButton(x + 129, y, itemField, IdFieldMode.ITEM);
         addLabelTooltip(lx, y + 3, UIText.of("ponderer.ui.show_controls.item"), UIText.of("ponderer.ui.show_controls.item.tooltip"));
         y += 22;
         sneakToggle = createToggle(x, y);
@@ -141,6 +144,7 @@ public class ShowControlsScreen extends AbstractStepEditorScreen {
         renderToggleState(graphics, ctrlToggle, whileCTRL);
         // Pick button label
         renderPickButtonLabel(graphics, pickBtnPoint);
+        renderJeiButtonLabel(graphics, jeiBtn);
     }
 
     private String optionLabel(String prefix, String value) {

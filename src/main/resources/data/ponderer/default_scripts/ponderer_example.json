@@ -297,6 +297,9 @@
         {
           "type": "set_block",
           "block": "minecraft:white_banner",
+          "blockProperties": {
+            "rotation": "8"
+          },
           "blockPos": [
             0,
             1,

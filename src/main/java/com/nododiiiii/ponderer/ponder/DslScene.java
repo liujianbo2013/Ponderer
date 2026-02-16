@@ -1,6 +1,7 @@
 package com.nododiiiii.ponderer.ponder;
 
 import java.util.List;
+import java.util.Map;
 
 public class DslScene {
     public String id;
@@ -57,6 +58,7 @@ public class DslScene {
         public String source;
         public String color;
         public String block;
+        public Map<String, String> blockProperties;
         public List<Integer> blockPos;
         public List<Integer> blockPos2;
         public List<Double> offset;

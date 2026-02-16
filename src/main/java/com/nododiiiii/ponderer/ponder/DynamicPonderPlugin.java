@@ -36,6 +36,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
@@ -610,6 +611,7 @@ public class DynamicPonderPlugin implements PonderPlugin {
             return;
         }
         BlockState state = block.defaultBlockState();
+        state = applyBlockProperties(state, step);
         BlockPos pos;
         if (step.blockPos != null && step.blockPos.size() >= 3) {
             pos = new BlockPos(step.blockPos.get(0), step.blockPos.get(1), step.blockPos.get(2));
@@ -668,7 +670,30 @@ public class DynamicPonderPlugin implements PonderPlugin {
         }
         boolean particles = !Boolean.FALSE.equals(step.spawnParticles);
         var selection = scene.getScene().getSceneBuildingUtil().select().fromTo(pos1, pos2);
-        scene.world().replaceBlocks(selection, block.defaultBlockState(), particles);
+        BlockState state = block.defaultBlockState();
+        state = applyBlockProperties(state, step);
+        scene.world().replaceBlocks(selection, state, particles);
+    }
+
+    private BlockState applyBlockProperties(BlockState state, DslScene.DslStep step) {
+        if (step.blockProperties == null || step.blockProperties.isEmpty()) return state;
+        var definition = state.getBlock().getStateDefinition();
+        for (var entry : step.blockProperties.entrySet()) {
+            Property<?> prop = definition.getProperty(entry.getKey());
+            if (prop == null) {
+                LOGGER.warn("Unknown block property '{}' for {}", entry.getKey(), step.block);
+                continue;
+            }
+            state = setPropertyValue(state, prop, entry.getValue());
+        }
+        return state;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Comparable<T>> BlockState setPropertyValue(BlockState state, Property<T> prop, String value) {
+        return prop.getValue(value)
+                .map(v -> state.setValue(prop, v))
+                .orElse(state);
     }
 
     private void applyHideSection(SceneBuilder scene, DslScene.DslStep step) {

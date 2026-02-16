@@ -416,5 +416,13 @@
   "ponderer.cmd.export.failed": "Ponderer: export failed: %s",
   "ponderer.cmd.import.done": "Ponderer: imported %s files from %s",
   "ponderer.cmd.import.failed": "Ponderer: import failed: %s",
-  "ponderer.cmd.import.not_found": "Ponderer: zip file not found: %s"
+  "ponderer.cmd.import.not_found": "Ponderer: zip file not found: %s",
+
+  "ponderer.ui.jei_browse.tooltip": "Browse with JEI (click to toggle)",
+  "ponderer.ui.jei.error.not_block": "This item has no block form",
+  "ponderer.ui.jei.error.not_spawn_egg": "No matching entity type found",
+
+  "ponderer.ui.block_properties": "Properties",
+  "ponderer.ui.block_properties.hint": "facing=north,half=upper",
+  "ponderer.ui.block_properties.tooltip": "Block state properties in key=value format, comma-separated"
 }

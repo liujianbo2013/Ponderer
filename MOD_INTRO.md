@@ -14,6 +14,9 @@ Ponderer 是一个面向玩家与整合包作者的「游戏内思索（Ponder�
 - **多人协作同步**：支持从服务器拉取与向服务器推送思索内容，方便团队协作维护教程或快速获取其他玩家创建的思索。
 - **格式互转**：支持与 PonderJS 格式互相转换，兼容不同工作流。
 - **场景包导入导出**：支持将所有场景和结构打包为 ZIP 文件，方便在社区分享或备份。
+- **JEI 集成**：所有 ID 输入框支持从 JEI 物品列表中点击或拖放自动填入（需安装 JEI），方块、物品、实体三种模式自动过滤不兼容类型。
+- **方块状态属性**：放置或替换方块时可指定朝向、半边等 BlockState 属性，编辑器中以动态列表形式输入。
+- **扩展实体解析**：船、矿车、盔甲架等物品类实体也可通过 JEI 直接拖入实体 ID 字段。
 
 ## 指令总览（用途 + 用法）
 
@@ -79,6 +82,9 @@ You can build, edit, and iterate tutorial scenes directly in Minecraft without l
 - **Multiplayer collaboration sync**: Pull from and push to server-side scene data, making it easy for teams to collaboratively maintain tutorials or for players to quickly access scenes created by others.
 - **Format conversion**: Convert to and from PonderJS for cross-workflow compatibility.
 - **Scene pack export/import**: Export all scenes and structures as a ZIP file for easy community sharing or backup.
+- **JEI integration**: All ID input fields support click or drag-drop from JEI item list (requires JEI installed). Supports block, item, and entity modes with automatic type filtering.
+- **Block state properties**: Specify BlockState properties (facing, half, etc.) when placing or replacing blocks, using a dynamic key=value list editor.
+- **Extended entity resolution**: Boats, minecarts, armor stands, and other item-based entities can be dragged into entity ID fields via JEI.
 
 ## Command Reference (Purpose + Usage)
 

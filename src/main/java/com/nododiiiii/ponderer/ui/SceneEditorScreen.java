@@ -376,7 +376,8 @@ public class SceneEditorScreen extends AbstractSimiScreen {
 
     private void drawSmallButton(GuiGraphics graphics, int x, int y, String label,
             int actionId, int rowIndex, int mouseX, int mouseY) {
-        boolean hovered = mouseX >= x && mouseX < x + SMALL_BTN
+        boolean disabled = isActionDisabled(actionId, rowIndex);
+        boolean hovered = !disabled && mouseX >= x && mouseX < x + SMALL_BTN
                 && mouseY >= y && mouseY < y + STEP_ROW_HEIGHT - 2;
         if (hovered) {
             hoveredRow = -1; // prevent text-area hover when on button
@@ -384,7 +385,7 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             // Store the row for action handling
             hoveredActionRow = rowIndex;
         }
-        int bg = hovered ? 0x60_FFFFFF : 0x30_FFFFFF;
+        int bg = disabled ? 0x10_FFFFFF : (hovered ? 0x60_FFFFFF : 0x30_FFFFFF);
         graphics.fill(x, y, x + SMALL_BTN, y + STEP_ROW_HEIGHT - 2, bg);
 
         ResourceLocation icon = switch (actionId) {
@@ -395,7 +396,11 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         };
 
         if (icon != null) {
-            graphics.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            if (disabled) {
+                graphics.setColor(0.25f, 0.25f, 0.25f, 1.0f);
+            } else {
+                graphics.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            }
             graphics.pose().pushPose();
             graphics.pose().translate(0, 0, 500);
             if (actionId == 5) {
@@ -405,20 +410,42 @@ public class SceneEditorScreen extends AbstractSimiScreen {
                 // Move Up/Down icons (using 24x24 as requested, centered on the 14x16 button)
                 graphics.blitSprite(icon, x, y - 4, 24, 24);
             }
+            graphics.setColor(1.0f, 1.0f, 1.0f, 1.0f);
             graphics.pose().popPose();
         } else {
             var font = Minecraft.getInstance().font;
             graphics.pose().pushPose();
             graphics.pose().translate(0, 0, 500);
-            int textColor = switch (actionId) {
-                case 2 -> 0xFF_80FF80; // green for insert
-                case 3 -> 0xFF_80C0FF; // blue for copy
-                case 4 -> clipboard != null ? 0xFF_FFD080 : 0xFF_606060; // orange for paste, gray when empty
-                default -> 0xFFFFFFFF;
-            };
+            int textColor;
+            if (disabled) {
+                textColor = 0xFF_404040;
+            } else {
+                textColor = switch (actionId) {
+                    case 2 -> 0xFF_80FF80; // green for insert
+                    case 3 -> 0xFF_80C0FF; // blue for copy
+                    case 4 -> clipboard != null ? 0xFF_FFD080 : 0xFF_606060; // orange for paste, gray when empty
+                    default -> 0xFFFFFFFF;
+                };
+            }
             graphics.drawCenteredString(font, label, x + SMALL_BTN / 2, y + 4, textColor);
             graphics.pose().popPose();
         }
+    }
+
+    /**
+     * Returns true if the given action should be disabled for the given row.
+     * Protects the first show_structure step from being moved or deleted.
+     */
+    private boolean isActionDisabled(int actionId, int rowIndex) {
+        List<DslScene.DslStep> steps = getSteps();
+        if (steps.isEmpty()) return false;
+        DslScene.DslStep first = steps.get(0);
+        if (first == null || !"show_structure".equalsIgnoreCase(first.type)) return false;
+        // Row 0 (show_structure): disable delete, move-up, move-down
+        if (rowIndex == 0 && (actionId == 5 || actionId == 0 || actionId == 1)) return true;
+        // Row 1: disable move-up (would swap with show_structure)
+        if (rowIndex == 1 && actionId == 0) return true;
+        return false;
     }
 
     /* -------- Input -------- */
@@ -428,6 +455,9 @@ public class SceneEditorScreen extends AbstractSimiScreen {
         if (button == 0) {
             // Check action buttons first
             if (hoveredAction >= 0 && hoveredActionRow >= 0) {
+                if (isActionDisabled(hoveredAction, hoveredActionRow)) {
+                    return true; // swallow click on disabled button
+                }
                 List<DslScene.DslStep> steps = getSteps();
                 if (hoveredActionRow < steps.size()) {
                     switch (hoveredAction) {
@@ -762,6 +792,14 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             // scenes[] mode: create a new scene after the current one
             DslScene.SceneSegment newScene = new DslScene.SceneSegment();
             newScene.steps = new ArrayList<>();
+            // Auto-populate with show_structure + idle(20t)
+            DslScene.DslStep showStep = new DslScene.DslStep();
+            showStep.type = "show_structure";
+            newScene.steps.add(showStep);
+            DslScene.DslStep idleStep = new DslScene.DslStep();
+            idleStep.type = "idle";
+            idleStep.duration = 20;
+            newScene.steps.add(idleStep);
             newScene.id = "new_" + (scene.scenes.size() + 1);
             if (!(scene.scenes instanceof ArrayList)) {
                 scene.scenes = new ArrayList<>(scene.scenes);
@@ -769,10 +807,17 @@ public class SceneEditorScreen extends AbstractSimiScreen {
             scene.scenes.add(sceneIndex + 1, newScene);
             newSceneIndex = sceneIndex + 1;
         } else {
-            // Flat steps mode: insert a next_scene marker
+            // Flat steps mode: insert a next_scene marker + show_structure + idle(20t)
             DslScene.DslStep ns = new DslScene.DslStep();
             ns.type = "next_scene";
             getMutableSteps().add(ns);
+            DslScene.DslStep showStep = new DslScene.DslStep();
+            showStep.type = "show_structure";
+            getMutableSteps().add(showStep);
+            DslScene.DslStep idleStep = new DslScene.DslStep();
+            idleStep.type = "idle";
+            idleStep.duration = 20;
+            getMutableSteps().add(idleStep);
         }
         saveToFile();
 

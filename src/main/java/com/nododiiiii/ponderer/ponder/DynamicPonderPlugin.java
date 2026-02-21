@@ -352,6 +352,7 @@ public class DynamicPonderPlugin implements PonderPlugin {
 
             if (!hasShowStructure(sc)) {
                 applyShowStructure(builder, new DslScene.DslStep());
+                builder.idle(20);
             }
 
             StepContext context = new StepContext();
@@ -701,6 +702,18 @@ public class DynamicPonderPlugin implements PonderPlugin {
         if (selection == null) {
             return;
         }
+        // Safety: auto-initialize base world section if empty (prevents NPE)
+        scene.addInstruction(ps -> {
+            if (ps.getBaseWorldSection().isEmpty()) {
+                LOGGER.warn("hide_section executed before show_structure; auto-showing structure");
+                Selection all = ps.getSceneBuildingUtil().select().everywhere();
+                ps.getBaseWorldSection().set(all);
+                ps.getBaseWorldSection().setVisible(true);
+                ps.getBaseWorldSection().setFade(1);
+                ps.getBaseWorldSection().queueRedraw();
+            }
+        });
+        scene.idle(20);
         scene.world().hideSection(selection, parseDirection(step.direction));
     }
 

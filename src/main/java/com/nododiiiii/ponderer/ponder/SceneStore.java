@@ -200,6 +200,7 @@ public final class SceneStore {
 
         try {
             Files.createDirectories(filePath.getParent());
+            sanitizeScene(scene);
             String json = GSON_PRETTY.toJson(scene);
             Files.writeString(filePath, json);
             LOGGER.info("Saved scene {} to {}", scene.id, filePath);
@@ -321,6 +322,7 @@ public final class SceneStore {
                             LOGGER.warn("Skipping invalid scene file (missing id): {}", path);
                             return;
                         }
+                        sanitizeScene(scene);
                         loaded.add(scene);
                     } catch (Exception e) {
                         LOGGER.warn("Failed to read scene file: {}", path, e);
@@ -333,5 +335,79 @@ public final class SceneStore {
         SceneRuntime.setScenes(loaded);
         LOGGER.info("Loaded {} ponderer scene(s) from {}", loaded.size(), dir);
         return loaded.size();
+    }
+
+    /**
+     * Ensure every scene segment starts with a "show_structure" step.
+     * If the first meaningful step is not show_structure, prepend one.
+     * This prevents crashes when operations like hide_section come first.
+     */
+    public static void sanitizeScene(DslScene scene) {
+        if (scene.scenes != null) {
+            for (DslScene.SceneSegment seg : scene.scenes) {
+                ensureFirstStepIsShowStructure(seg);
+            }
+        }
+        // Also handle legacy flat steps list
+        if (scene.steps != null && !scene.steps.isEmpty()) {
+            ensureFirstStepIsShowStructureFlat(scene);
+        }
+    }
+
+    private static void ensureFirstStepIsShowStructure(DslScene.SceneSegment seg) {
+        if (seg.steps == null || seg.steps.isEmpty()) return;
+        for (DslScene.DslStep step : seg.steps) {
+            if (step == null || step.type == null) continue;
+            if ("show_structure".equalsIgnoreCase(step.type)) return; // already correct
+            break; // first meaningful step is not show_structure
+        }
+        // Prepend show_structure + idle(20t)
+        List<DslScene.DslStep> fixed = new ArrayList<>();
+        DslScene.DslStep showStep = new DslScene.DslStep();
+        showStep.type = "show_structure";
+        fixed.add(showStep);
+        DslScene.DslStep idleStep = new DslScene.DslStep();
+        idleStep.type = "idle";
+        idleStep.duration = 20;
+        fixed.add(idleStep);
+        fixed.addAll(seg.steps);
+        seg.steps = fixed;
+    }
+
+    /**
+     * Ensures every segment in flat steps mode starts with show_structure.
+     * Segments are delimited by next_scene steps.
+     */
+    private static void ensureFirstStepIsShowStructureFlat(DslScene scene) {
+        List<DslScene.DslStep> result = new ArrayList<>();
+        boolean needsShowStructure = true; // start of first segment
+
+        for (DslScene.DslStep step : scene.steps) {
+            if (step == null || step.type == null) {
+                result.add(step);
+                continue;
+            }
+            if ("next_scene".equalsIgnoreCase(step.type)) {
+                result.add(step);
+                needsShowStructure = true; // next segment starts
+                continue;
+            }
+            if (needsShowStructure) {
+                if (!"show_structure".equalsIgnoreCase(step.type)) {
+                    // Prepend show_structure + idle(20t) before this segment's first real step
+                    DslScene.DslStep showStep = new DslScene.DslStep();
+                    showStep.type = "show_structure";
+                    result.add(showStep);
+                    DslScene.DslStep idleStep = new DslScene.DslStep();
+                    idleStep.type = "idle";
+                    idleStep.duration = 20;
+                    result.add(idleStep);
+                }
+                needsShowStructure = false;
+            }
+            result.add(step);
+        }
+
+        scene.steps = result;
     }
 }

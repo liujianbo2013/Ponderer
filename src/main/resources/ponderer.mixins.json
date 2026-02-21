@@ -4,8 +4,10 @@
   "package": "com.nododiiiii.ponderer.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "PonderLocalizationMixin",
     "PonderSceneRegistryMixin",
-    "PonderSceneRegistryNbtMixin"
+    "PonderSceneRegistryNbtMixin",
+    "WorldSectionElementImplMixin"
   ],
   "client": [
     "PonderUIAccessor",

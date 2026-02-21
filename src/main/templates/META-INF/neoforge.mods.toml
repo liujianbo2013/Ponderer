@@ -75,16 +75,16 @@ side = "BOTH"
 
 [[dependencies."${mod_id}"]]
 modId = "ponder"
-type = "required"
-# Ponder is bundled via jarJar; NeoForge deduplicates when Create/PonderJS also ships it
+type = "optional"
+# Ponder is bundled via jarJar for standalone; when Create provides a newer version, that takes priority
 versionRange = "[1.0,)"
 ordering = "AFTER"
 side = "CLIENT"
 
 [[dependencies."${mod_id}"]]
 modId = "flywheel"
-type = "required"
-# Flywheel is bundled via jarJar; NeoForge deduplicates when Create also ships it
+type = "optional"
+# Flywheel is bundled via jarJar for standalone; when Create provides a newer version, that takes priority
 versionRange = "[1.0,)"
 ordering = "AFTER"
 side = "CLIENT"

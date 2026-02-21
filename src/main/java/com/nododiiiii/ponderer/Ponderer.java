@@ -41,6 +41,7 @@ public class Ponderer {
             SceneStore.reloadFromDisk();
             PonderIndex.addPlugin(new DynamicPonderPlugin());
             PonderIndex.reload();
+            PonderConfig.client().editingMode.set(false);
         });
     }
 

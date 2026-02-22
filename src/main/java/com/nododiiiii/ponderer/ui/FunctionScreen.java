@@ -47,6 +47,9 @@ public class FunctionScreen extends NavigatableSimiScreen {
             new ButtonDef("ponderer.ui.function_page.new_scene", () -> {
                 Minecraft.getInstance().setScreen(buildNewScenePage());
             }, "ponderer.ui.function_page.new_scene.tooltip"),
+            new ButtonDef("ponderer.ui.function_page.ai_generate", () -> {
+                Minecraft.getInstance().setScreen(new AiGenerateScreen());
+            }, "ponderer.ui.function_page.ai_generate.tooltip"),
             new ButtonDef("ponderer.ui.function_page.copy_scene", () -> {
                 Minecraft.getInstance().setScreen(buildCopyPage());
             }, "ponderer.ui.function_page.copy_scene.tooltip"),
@@ -108,7 +111,10 @@ public class FunctionScreen extends NavigatableSimiScreen {
             new ButtonDef("ponderer.ui.function_page.keybindings", () -> {
                 Minecraft mc = Minecraft.getInstance();
                 mc.setScreen(new KeyBindsScreen(null, mc.options));
-            }, "ponderer.ui.function_page.keybindings.tooltip")
+            }, "ponderer.ui.function_page.keybindings.tooltip"),
+            new ButtonDef("ponderer.ui.function_page.ai_config", () -> {
+                Minecraft.getInstance().setScreen(new AiConfigScreen());
+            }, "ponderer.ui.function_page.ai_config.tooltip")
         )));
     }
 

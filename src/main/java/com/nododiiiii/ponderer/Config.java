@@ -12,5 +12,65 @@ public class Config {
                  "the built-in Blueprint item will not appear in the creative tab.")
         .define("blueprintCarrierItem", "minecraft:paper");
 
+    // -- AI Scene Generation --
+
+    public static final ForgeConfigSpec.ConfigValue<String> AI_PROVIDER = BUILDER
+        .comment("LLM provider type: 'anthropic' or 'openai' (OpenAI-compatible).",
+                 "Use 'openai' for OpenAI, DeepSeek, Groq, Ollama, LM Studio, etc.")
+        .define("ai.provider", "anthropic");
+
+    public static final ForgeConfigSpec.ConfigValue<String> AI_API_BASE_URL = BUILDER
+        .comment("API base URL. Leave empty to use provider defaults.",
+                 "Anthropic default: https://api.anthropic.com",
+                 "OpenAI default: https://api.openai.com",
+                 "For compatible APIs, set to e.g. https://api.deepseek.com")
+        .define("ai.apiBaseUrl", "");
+
+    public static final ForgeConfigSpec.ConfigValue<String> AI_API_KEY = BUILDER
+        .comment("API key for the selected provider.")
+        .define("ai.apiKey", "");
+
+    public static final ForgeConfigSpec.ConfigValue<String> AI_MODEL = BUILDER
+        .comment("Model name. Leave empty to use provider defaults.",
+                 "Anthropic default: claude-sonnet-4-20250514",
+                 "OpenAI default: gpt-4o")
+        .define("ai.model", "");
+
+    public static final ForgeConfigSpec.ConfigValue<String> AI_PROXY = BUILDER
+        .comment("HTTP proxy for AI API calls. Format: host:port (e.g. 127.0.0.1:7890).",
+                 "Leave empty for no proxy.")
+        .define("ai.proxy", "");
+
+    public static final ForgeConfigSpec.BooleanValue AI_TRUST_ALL_SSL = BUILDER
+        .comment("Trust all SSL certificates (disable verification).",
+                 "Enable this if you use a proxy that does SSL interception.",
+                 "WARNING: only enable when using a trusted local proxy.")
+        .define("ai.trustAllSsl", false);
+
+    /** Resolve the effective base URL (use default if config is empty). */
+    public static String getEffectiveBaseUrl() {
+        String url = AI_API_BASE_URL.get().trim();
+        if (!url.isEmpty()) {
+            if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+            // Auto-add https:// if no scheme is present
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+            }
+            // Strip trailing /v1 if present — providers will add it themselves
+            if (url.endsWith("/v1")) {
+                url = url.substring(0, url.length() - 3);
+            }
+            return url;
+        }
+        return "anthropic".equals(AI_PROVIDER.get()) ? "https://api.anthropic.com" : "https://api.openai.com";
+    }
+
+    /** Resolve the effective model name (use default if config is empty). */
+    public static String getEffectiveModel() {
+        String model = AI_MODEL.get().trim();
+        if (!model.isEmpty()) return model;
+        return "anthropic".equals(AI_PROVIDER.get()) ? "claude-sonnet-4-20250514" : "gpt-4o";
+    }
+
     public static final ForgeConfigSpec SPEC = BUILDER.build();
 }

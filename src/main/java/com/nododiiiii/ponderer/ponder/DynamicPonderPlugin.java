@@ -30,6 +30,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -399,6 +400,8 @@ public class DynamicPonderPlugin implements PonderPlugin {
             case "modify_block_entity_nbt" -> applyModifyBlockEntityNbt(scene, step);
             case "indicate_redstone" -> applyIndicateRedstone(scene, step);
             case "indicate_success" -> applyIndicateSuccess(scene, step);
+            case "clear_entities" -> applyClearEntities(scene, step);
+            case "clear_item_entities" -> applyClearItemEntities(scene, step);
             case "next_scene" -> {
             }
             default -> LOGGER.warn("Unknown step type '{}' in scene {}", step.type, dsl.id);
@@ -809,6 +812,52 @@ public class DynamicPonderPlugin implements PonderPlugin {
         }
         BlockPos pos = new BlockPos(step.blockPos.get(0), step.blockPos.get(1), step.blockPos.get(2));
         scene.effects().indicateSuccess(pos);
+    }
+
+    private void applyClearEntities(SceneBuilder scene, DslScene.DslStep step) {
+        boolean isFullScene = Boolean.TRUE.equals(step.fullScene);
+        String filterId = step.entity;
+        ResourceLocation filterLoc = (filterId != null && !filterId.isBlank()) ? ResourceLocation.tryParse(filterId) : null;
+
+        if (isFullScene) {
+            scene.world().modifyEntities(Entity.class, entity -> {
+                if (entity instanceof ItemEntity) return;
+                if (filterLoc == null || EntityType.getKey(entity.getType()).equals(filterLoc)) {
+                    entity.discard();
+                }
+            });
+        } else {
+            Selection selection = selectionFromStep(scene, step, "clear_entities");
+            if (selection == null) return;
+            scene.world().modifyEntitiesInside(Entity.class, selection, entity -> {
+                if (entity instanceof ItemEntity) return;
+                if (filterLoc == null || EntityType.getKey(entity.getType()).equals(filterLoc)) {
+                    entity.discard();
+                }
+            });
+        }
+    }
+
+    private void applyClearItemEntities(SceneBuilder scene, DslScene.DslStep step) {
+        boolean isFullScene = Boolean.TRUE.equals(step.fullScene);
+        String filterId = step.item;
+        ResourceLocation filterLoc = (filterId != null && !filterId.isBlank()) ? ResourceLocation.tryParse(filterId) : null;
+
+        if (isFullScene) {
+            scene.world().modifyEntities(ItemEntity.class, entity -> {
+                if (filterLoc == null || BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).equals(filterLoc)) {
+                    entity.discard();
+                }
+            });
+        } else {
+            Selection selection = selectionFromStep(scene, step, "clear_item_entities");
+            if (selection == null) return;
+            scene.world().modifyEntitiesInside(ItemEntity.class, selection, entity -> {
+                if (filterLoc == null || BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).equals(filterLoc)) {
+                    entity.discard();
+                }
+            });
+        }
     }
 
     private Selection selectionFromStep(SceneBuilder scene, DslScene.DslStep step, String stepName) {

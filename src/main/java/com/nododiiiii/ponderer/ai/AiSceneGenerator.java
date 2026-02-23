@@ -423,7 +423,7 @@ public class AiSceneGenerator {
             Available step types:
             show_structure, idle, text, show_controls, play_sound, set_block, destroy_block, replace_blocks,
             hide_section, show_section_and_merge, toggle_redstone_power, modify_block_entity_nbt,
-            create_entity, create_item_entity, rotate_section, move_section, indicate_redstone,
+            create_entity, create_item_entity, clear_entities, clear_item_entities, rotate_section, move_section, indicate_redstone,
             indicate_success, encapsulate_bounds, rotate_camera_y
 
             Coordinate system: X=east(+)/west(-), Y=up(+)/down(-), Z=south(+)/north(-). [0,0,0] = bottom-north-west corner.
@@ -654,7 +654,31 @@ public class AiSceneGenerator {
             **Example**: {"type":"create_item_entity", "item":"minecraft:iron_ingot", "pos":[2.5, 2.0, 3.5], "motion":[0, 0.15, 0]}
 
             ---
-            ### 18. rotate_section
+            ### 18. clear_entities
+            **Purpose**: Removes living entities (mobs) from the scene. Can clear all entities or filter by entity type, and can target the full scene or a specific region.
+            **When to use**: When resetting a scene after demonstrating mob interactions (e.g. clearing zombies after showing a trap), or before spawning a new set of entities. Does NOT affect item entities (dropped items).
+            **Fields**:
+            - entity (string, optional): entity type id to filter (e.g. "minecraft:zombie"). If omitted, clears ALL non-item entities.
+            - fullScene (bool, optional): if true, clears entities in the entire scene. If false/omitted, uses blockPos/blockPos2 region.
+            - blockPos (int[3], optional): one corner of the region to clear (required if fullScene is not true)
+            - blockPos2 (int[3], optional): opposite corner of the region
+            **Example**: {"type":"clear_entities", "fullScene":true}
+            **Example (filtered)**: {"type":"clear_entities", "entity":"minecraft:zombie", "blockPos":[0,0,0], "blockPos2":[4,3,4]}
+
+            ---
+            ### 19. clear_item_entities
+            **Purpose**: Removes item entities (dropped items) from the scene. Can clear all item entities or filter by item type, and can target the full scene or a specific region.
+            **When to use**: When cleaning up after demonstrating item drops, hopper mechanics, or machine output — to reset the scene before the next demonstration step.
+            **Fields**:
+            - item (string, optional): item id to filter (e.g. "minecraft:diamond"). If omitted, clears ALL item entities.
+            - fullScene (bool, optional): if true, clears item entities in the entire scene. If false/omitted, uses blockPos/blockPos2 region.
+            - blockPos (int[3], optional): one corner of the region to clear (required if fullScene is not true)
+            - blockPos2 (int[3], optional): opposite corner of the region
+            **Example**: {"type":"clear_item_entities", "fullScene":true}
+            **Example (filtered)**: {"type":"clear_item_entities", "item":"minecraft:iron_ingot", "blockPos":[0,0,0], "blockPos2":[4,3,4]}
+
+            ---
+            ### 20. rotate_section
             **Purpose**: Smoothly rotates a section of blocks around its center over a duration. Creates a spinning/tilting animation effect.
             **When to use**: When demonstrating mechanical rotation, or for dramatic visual effect. The section must have been previously created with show_section_and_merge with a matching linkId.
             **Fields**:
@@ -667,7 +691,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"rotate_section", "linkId":"gear", "duration":40, "rotY":90}
 
             ---
-            ### 19. move_section
+            ### 21. move_section
             **Purpose**: Smoothly translates a section of blocks by an offset over a duration. Creates a sliding animation.
             **When to use**: When showing pistons pushing blocks, doors opening, or any translational movement of a group of blocks.
             **Fields**:
@@ -677,7 +701,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"move_section", "linkId":"piston_head", "duration":10, "offset":[1.0, 0, 0]}
 
             ---
-            ### 20. indicate_redstone
+            ### 22. indicate_redstone
             **Purpose**: Shows a pulsing red particle indicator at a block position. Visual cue to draw attention to a redstone-related block.
             **When to use**: When you want to highlight that a specific block is receiving or emitting redstone power, without changing any block state.
             **Fields**:
@@ -685,7 +709,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"indicate_redstone", "blockPos":[2,1,3]}
 
             ---
-            ### 21. indicate_success
+            ### 23. indicate_success
             **Purpose**: Shows a pulsing green checkmark/success particle indicator at a block position. Visual cue for "this is correct" or "this is complete".
             **When to use**: Sparingly. Use only at true conclusion points (end of tutorial, final configuration achieved, or major milestone reached). Avoid spamming it at every small action — overuse dilutes its impact. Use 1-2 times per scene segment, not once per step.
             **Fields**:

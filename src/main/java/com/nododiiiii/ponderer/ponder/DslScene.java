@@ -73,6 +73,7 @@ public class DslScene {
         public Boolean attachKeyFrame;
         public Boolean whileSneaking;
         public Boolean whileCTRL;
+        public Boolean fullScene;
 
         public int durationOrDefault(int fallback) {
             return duration == null ? fallback : Math.max(duration, 0);

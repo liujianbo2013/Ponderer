@@ -692,6 +692,10 @@ public class SceneEditorScreen extends AbstractSimiScreen {
                 case "move_section" -> stepTypeName("move_section");
                 case "indicate_redstone" -> stepTypeName("indicate_redstone");
                 case "indicate_success" -> stepTypeName("indicate_success");
+                case "clear_entities" -> UIText.of("ponderer.ui.step.summary.single_arg",
+                    stepTypeName("clear_entities"), step.entity != null && !step.entity.isEmpty() ? step.entity : "*");
+                case "clear_item_entities" -> UIText.of("ponderer.ui.step.summary.single_arg",
+                    stepTypeName("clear_item_entities"), step.item != null && !step.item.isEmpty() ? step.item : "*");
             case "next_scene" -> UIText.of("ponderer.ui.step.summary.next_scene");
             default -> step.type;
         };

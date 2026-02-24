@@ -108,6 +108,11 @@ public class PondererJeiPlugin implements IModPlugin {
     }
 
     @Nullable
+    static IJeiRuntime getRuntime() {
+        return runtime;
+    }
+
+    @Nullable
     static IdFieldMode getActiveMode() {
         return activeMode;
     }
@@ -134,6 +139,24 @@ public class PondererJeiPlugin implements IModPlugin {
         }
         if (ingredient.isEmpty()) return;
 
+        // INGREDIENT mode: accept any JEI ingredient type
+        if (activeMode == IdFieldMode.INGREDIENT) {
+            String id = JeiIngredientHelper.resolveId(ingredient.get());
+            if (id != null) {
+                HintableTextFieldWidget field = aware.getJeiTargetField();
+                if (field != null) {
+                    field.setValue(id);
+                }
+                aware.deactivateJei();
+                event.setCanceled(true);
+            } else {
+                aware.showJeiIncompatibleWarning(activeMode);
+                event.setCanceled(true);
+            }
+            return;
+        }
+
+        // Other modes: only accept items
         Optional<ItemStack> stackOpt = ingredient.get().getItemStack();
         if (stackOpt.isEmpty()) {
             event.setCanceled(true);

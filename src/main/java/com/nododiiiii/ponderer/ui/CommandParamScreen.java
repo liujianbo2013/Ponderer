@@ -574,7 +574,7 @@ public class CommandParamScreen extends AbstractSimiScreen implements JeiAwareSc
         errorMessage = switch (mode) {
             case BLOCK -> UIText.of("ponderer.ui.jei.error.not_block");
             case ENTITY -> UIText.of("ponderer.ui.jei.error.not_spawn_egg");
-            case ITEM -> null;
+            case ITEM, INGREDIENT -> null;
         };
     }
 

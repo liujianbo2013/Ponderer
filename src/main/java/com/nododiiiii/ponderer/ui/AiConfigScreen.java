@@ -28,6 +28,7 @@ public class AiConfigScreen extends AbstractSimiScreen {
     private HintableTextFieldWidget apiKeyField;
     private HintableTextFieldWidget modelField;
     private HintableTextFieldWidget proxyField;
+    private HintableTextFieldWidget maxTokensField;
     private boolean trustAllSsl;
     private boolean initialized = false;
 
@@ -39,25 +40,27 @@ public class AiConfigScreen extends AbstractSimiScreen {
     }
 
     private int getWindowHeight() {
-        return 36 + 6 * ROW_H + 40;
+        return 36 + 7 * ROW_H + 40;
     }
 
     @Override
     protected void init() {
         // On re-init, save current widget values before rebuilding
-        String curProvider, curBaseUrl, curApiKey, curModel, curProxy;
+        String curProvider, curBaseUrl, curApiKey, curModel, curProxy, curMaxTokens;
         if (initialized) {
             curProvider = providerField.getValue();
             curBaseUrl = baseUrlField.getValue();
             curApiKey = apiKeyField.getValue();
             curModel = modelField.getValue();
             curProxy = proxyField.getValue();
+            curMaxTokens = maxTokensField.getValue();
         } else {
             curProvider = Config.AI_PROVIDER.get();
             curBaseUrl = Config.AI_API_BASE_URL.get();
             curApiKey = Config.AI_API_KEY.get();
             curModel = Config.AI_MODEL.get();
             curProxy = Config.AI_PROXY.get();
+            curMaxTokens = String.valueOf(Config.AI_MAX_TOKENS.get());
             trustAllSsl = Config.AI_TRUST_ALL_SSL.get();
             initialized = true;
         }
@@ -111,6 +114,14 @@ public class AiConfigScreen extends AbstractSimiScreen {
         addRenderableWidget(proxyField);
         y += ROW_H;
 
+        // Max Tokens
+        maxTokensField = new SoftHintTextFieldWidget(font, fieldX, y + 2, fieldW, 16);
+        maxTokensField.setHint(UIText.of("ponderer.ui.ai_config.max_tokens.hint"));
+        maxTokensField.setMaxLength(10);
+        maxTokensField.setValue(curMaxTokens);
+        addRenderableWidget(maxTokensField);
+        y += ROW_H;
+
         // Trust All SSL (toggle button)
         clickableButtons.add(new ClickableButton(fieldX, y + 1, fieldW, 16,
             UIText.of("ponderer.ui.ai_config.trust_ssl") + ": " + (trustAllSsl ? "ON" : "OFF"),
@@ -134,6 +145,18 @@ public class AiConfigScreen extends AbstractSimiScreen {
         Config.AI_API_KEY.set(apiKeyField.getValue().trim());
         Config.AI_MODEL.set(modelField.getValue().trim());
         Config.AI_PROXY.set(proxyField.getValue().trim());
+
+        // Parse and validate max_tokens
+        try {
+            int maxTokens = Integer.parseInt(maxTokensField.getValue().trim());
+            // Clamp to valid range (1024-65536)
+            maxTokens = Math.max(1024, Math.min(65536, maxTokens));
+            Config.AI_MAX_TOKENS.set(maxTokens);
+        } catch (NumberFormatException e) {
+            // If invalid, keep default
+            Config.AI_MAX_TOKENS.set(16384);
+        }
+
         Config.AI_TRUST_ALL_SSL.set(trustAllSsl);
         goBack();
     }
@@ -172,6 +195,8 @@ public class AiConfigScreen extends AbstractSimiScreen {
         graphics.drawString(font, UIText.of("ponderer.ui.ai_config.model"), lx, y + 5, 0xCCCCCC);
         y += ROW_H;
         graphics.drawString(font, UIText.of("ponderer.ui.ai_config.proxy"), lx, y + 5, 0xCCCCCC);
+        y += ROW_H;
+        graphics.drawString(font, UIText.of("ponderer.ui.ai_config.max_tokens"), lx, y + 5, 0xCCCCCC);
         y += ROW_H;
         graphics.drawString(font, UIText.of("ponderer.ui.ai_config.trust_ssl"), lx, y + 5, 0xCCCCCC);
 

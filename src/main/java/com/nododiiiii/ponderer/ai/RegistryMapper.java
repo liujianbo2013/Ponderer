@@ -1,5 +1,6 @@
 package com.nododiiiii.ponderer.ai;
 
+import com.nododiiiii.ponderer.compat.jei.JeiCompat;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 
@@ -12,8 +13,10 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Builds display-name-to-registry-ID mappings from vanilla registries.
- * Used to help the LLM resolve localized names to proper IDs.
+ * Builds display-name-to-registry-ID mappings from all available registries.
+ * Indexes: Block, Entity Type (from vanilla registries), plus ALL JEI ingredient types
+ * (items, fluids, chemicals, etc.) when JEI is available.
+ * Falls back to Block + Item registries only when JEI is not available.
  *
  * <p>Lookup chain (per requested name):
  * <ol>
@@ -29,6 +32,18 @@ public class RegistryMapper {
     /** An entry in the combined lookup index. */
     private record Entry(String id, String displayName, String path) {}
 
+    private static void addEntry(List<Entry> allEntries, Set<String> indexedIds,
+                                  Map<String, List<Entry>> displayIndex,
+                                  Map<String, List<Entry>> pathIndex,
+                                  String id, String displayName, String path) {
+        if (indexedIds.contains(id)) return;
+        Entry e = new Entry(id, displayName, path);
+        allEntries.add(e);
+        indexedIds.add(id);
+        displayIndex.computeIfAbsent(displayName, k -> new ArrayList<>()).add(e);
+        pathIndex.computeIfAbsent(path, k -> new ArrayList<>()).add(e);
+    }
+
     /**
      * Build a targeted mapping for the names requested by the outline pass.
      *
@@ -37,33 +52,41 @@ public class RegistryMapper {
      */
     public static String buildMappingForDisplayNames(List<String> requestedNames,
                                                       List<String> structureBlockIds) {
-        // Build lookup tables that support multiple IDs per key (different mods, same name)
-        //   displayIndex — lowercase display name → [entries]
-        //   pathIndex    — lowercase id path      → [entries]
         Map<String, List<Entry>> displayIndex = new LinkedHashMap<>();
         Map<String, List<Entry>> pathIndex = new LinkedHashMap<>();
         List<Entry> allEntries = new ArrayList<>();
+        Set<String> indexedIds = new HashSet<>();
 
+        // --- Block registry (needed for set_block/replace_blocks ID resolution) ---
         BuiltInRegistries.BLOCK.forEach(block -> {
             String id = BuiltInRegistries.BLOCK.getKey(block).toString();
             String displayName = block.getName().getString().toLowerCase(Locale.ROOT);
             String path = BuiltInRegistries.BLOCK.getKey(block).getPath().toLowerCase(Locale.ROOT);
-            Entry e = new Entry(id, displayName, path);
-            allEntries.add(e);
-            displayIndex.computeIfAbsent(displayName, k -> new ArrayList<>()).add(e);
-            pathIndex.computeIfAbsent(path, k -> new ArrayList<>()).add(e);
+            addEntry(allEntries, indexedIds, displayIndex, pathIndex, id, displayName, path);
         });
-        BuiltInRegistries.ITEM.forEach(item -> {
-            String id = BuiltInRegistries.ITEM.getKey(item).toString();
-            String displayName = item.getDescription().getString().toLowerCase(Locale.ROOT);
-            String path = BuiltInRegistries.ITEM.getKey(item).getPath().toLowerCase(Locale.ROOT);
-            // Skip if this exact id was already added (block+item share the same id)
-            if (allEntries.stream().anyMatch(e -> e.id().equals(id))) return;
-            Entry e = new Entry(id, displayName, path);
-            allEntries.add(e);
-            displayIndex.computeIfAbsent(displayName, k -> new ArrayList<>()).add(e);
-            pathIndex.computeIfAbsent(path, k -> new ArrayList<>()).add(e);
+
+        // --- Entity type registry (needed for create_entity) ---
+        BuiltInRegistries.ENTITY_TYPE.forEach(entityType -> {
+            String id = BuiltInRegistries.ENTITY_TYPE.getKey(entityType).toString();
+            String displayName = entityType.getDescription().getString().toLowerCase(Locale.ROOT);
+            String path = BuiltInRegistries.ENTITY_TYPE.getKey(entityType).getPath().toLowerCase(Locale.ROOT);
+            addEntry(allEntries, indexedIds, displayIndex, pathIndex, id, displayName, path);
         });
+
+        // --- All JEI ingredient types (items, fluids, chemicals, etc. — unified) ---
+        if (JeiCompat.isAvailable()) {
+            for (String[] entry : JeiCompat.getAllExtraIngredientEntries()) {
+                addEntry(allEntries, indexedIds, displayIndex, pathIndex, entry[0], entry[1], entry[2]);
+            }
+        } else {
+            // Fallback: index Item registry when JEI is not available
+            BuiltInRegistries.ITEM.forEach(item -> {
+                String id = BuiltInRegistries.ITEM.getKey(item).toString();
+                String displayName = item.getDescription().getString().toLowerCase(Locale.ROOT);
+                String path = BuiltInRegistries.ITEM.getKey(item).getPath().toLowerCase(Locale.ROOT);
+                addEntry(allEntries, indexedIds, displayIndex, pathIndex, id, displayName, path);
+            });
+        }
 
         StringBuilder sb = new StringBuilder("Display Name → Registry ID mapping:\n");
         Set<String> addedIds = new HashSet<>();

@@ -64,7 +64,7 @@ public class StepEditorGhostHandler implements IGhostIngredientHandler<AbstractS
 
     static String resolveId(ItemStack stack, IdFieldMode mode) {
         return switch (mode) {
-            case ITEM -> {
+            case ITEM, INGREDIENT -> {
                 ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());
                 yield key.toString();
             }

@@ -47,6 +47,16 @@ public class Config {
                  "WARNING: only enable when using a trusted local proxy.")
         .define("ai.trustAllSsl", false);
 
+    public static final ForgeConfigSpec.IntValue AI_MAX_TOKENS = BUILDER
+        .comment("Maximum number of tokens the LLM can generate per request.",
+                 "Increase this if complex scenes are being cut off.",
+                 "WARNING: Some models have lower limits:",
+                 "  - Claude 3.5 Haiku: max 8192 tokens",
+                 "  - Other Claude models: max 4096 tokens",
+                 "  - GPT-4o / GPT-4o mini: max 4096 tokens",
+                 "Default: 16384. Range: 1024-65536. Adjust based on your model limits.")
+        .defineInRange("ai.maxTokens", 16384, 1024, 65536);
+
     /** Resolve the effective base URL (use default if config is empty). */
     public static String getEffectiveBaseUrl() {
         String url = AI_API_BASE_URL.get().trim();

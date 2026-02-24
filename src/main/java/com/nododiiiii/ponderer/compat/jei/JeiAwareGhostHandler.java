@@ -25,6 +25,30 @@ public class JeiAwareGhostHandler<T extends Screen & JeiAwareScreen> implements 
         HintableTextFieldWidget targetField = gui.getJeiTargetField();
         if (targetField == null) return List.of();
 
+        // INGREDIENT mode: accept any JEI ingredient type
+        if (mode == IdFieldMode.INGREDIENT) {
+            String id = JeiIngredientHelper.resolveId(ingredient);
+            if (id == null) return List.of();
+
+            Rect2i area = new Rect2i(
+                    targetField.getX(), targetField.getY(),
+                    targetField.getWidth(), targetField.getHeight()
+            );
+
+            return List.of(new Target<I>() {
+                @Override
+                public Rect2i getArea() {
+                    return area;
+                }
+
+                @Override
+                public void accept(I ing) {
+                    targetField.setValue(id);
+                }
+            });
+        }
+
+        // Other modes: only accept items
         Optional<ItemStack> stackOpt = ingredient.getItemStack();
         if (stackOpt.isEmpty()) return List.of();
 

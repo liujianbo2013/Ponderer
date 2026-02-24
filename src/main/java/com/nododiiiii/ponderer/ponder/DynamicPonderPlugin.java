@@ -2,6 +2,7 @@ package com.nododiiiii.ponderer.ponder;
 
 import com.mojang.logging.LogUtils;
 import com.nododiiiii.ponderer.blueprint.BlueprintFeature;
+import com.nododiiiii.ponderer.compat.jei.JeiCompat;
 import com.nododiiiii.ponderer.registry.ModItems;
 import net.createmod.catnip.math.Pointing;
 import net.createmod.ponder.api.PonderPalette;
@@ -540,11 +541,7 @@ public class DynamicPonderPlugin implements PonderPlugin {
         }
 
         if (step.item != null && !step.item.isBlank()) {
-            ResourceLocation itemId = ResourceLocation.tryParse(step.item);
-            Item item = itemId == null ? null : BuiltInRegistries.ITEM.getOptional(itemId).orElse(null);
-            if (item != null) {
-                builder.withItem(new ItemStack(item));
-            }
+            resolveIngredient(builder, step.item);
         }
 
         if (Boolean.TRUE.equals(step.whileSneaking)) {
@@ -553,6 +550,54 @@ public class DynamicPonderPlugin implements PonderPlugin {
         if (Boolean.TRUE.equals(step.whileCTRL)) {
             builder.whileCTRL();
         }
+    }
+
+    /**
+     * Resolve an ingredient ID and apply it to the builder.
+     * For items: use withItem() so the item renders alongside the action icon (LMB/RMB/Scroll).
+     * For non-items (fluids, chemicals, etc.): use showing() via JEI renderer, which replaces the icon slot.
+     * This distinction is critical because showing() overwrites the icon field (leftClick/rightClick/scroll),
+     * while withItem() uses a separate item field that renders alongside the icon.
+     */
+    private void resolveIngredient(InputElementBuilder builder, String id) {
+        ResourceLocation loc = ResourceLocation.tryParse(id);
+        if (loc == null) return;
+
+        // 1. Try item registry first — use withItem() to preserve action icon
+        Item item = BuiltInRegistries.ITEM.getOptional(loc).orElse(null);
+        if (item != null) {
+            builder.withItem(new ItemStack(item));
+            return;
+        }
+
+        // 2. Try fluid registry (requires JEI for rendering)
+        net.minecraft.world.level.material.Fluid fluid =
+                BuiltInRegistries.FLUID.getOptional(loc).orElse(null);
+        if (fluid != null && fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
+            if (JeiCompat.isAvailable()) {
+                net.createmod.catnip.gui.element.ScreenElement element =
+                        JeiCompat.createIngredientElement(
+                                new net.minecraftforge.fluids.FluidStack(fluid, 1000));
+                if (element != null) {
+                    builder.showing(element);
+                    return;
+                }
+            }
+            LOGGER.warn("show_controls: fluid '{}' found but JEI is not available for rendering", id);
+            return;
+        }
+
+        // 3. Fallback: search all JEI ingredient types (chemicals, etc.)
+        if (JeiCompat.isAvailable()) {
+            net.createmod.catnip.gui.element.ScreenElement element =
+                    JeiCompat.resolveIngredientById(id);
+            if (element != null) {
+                builder.showing(element);
+                return;
+            }
+        }
+
+        LOGGER.warn("show_controls: unable to resolve ingredient '{}'", id);
     }
 
     private void applyShowStructure(SceneBuilder scene, DslScene.DslStep step) {

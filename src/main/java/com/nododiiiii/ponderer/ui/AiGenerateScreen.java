@@ -43,6 +43,8 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
     private static String cachedCarrier = "";
     private static String cachedPrompt = "";
     private static final List<String> cachedUrlValues = new ArrayList<>();
+    private static boolean cachedBuildTutorial = true;
+    private static boolean cachedIncludeImages = true;
     // Adjustment mode removed for now — each generation is a fresh request
     @Nullable private static String cachedStatusMessage = null;
     private static int cachedStatusColor = 0xCCCCCC;
@@ -71,6 +73,7 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
             + ROW_H + 4                              // carrier
             + 50 + 4                                  // prompt (multi-line area)
             + urlCount * ROW_H + ROW_H + 4            // URL fields + add button
+            + ROW_H + 4                               // toggle options row
             + 12 + 24 + 10;                           // status + generate button
     }
 
@@ -173,6 +176,16 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
         // Add URL button
         clickableButtons.add(new ClickableButton(fieldX + 3, y + 1, fieldW - 6, 14,
             UIText.of("ponderer.ui.ai_generate.add_url"), this::addUrl));
+        y += ROW_H + 4;
+
+        // -- Toggle options: Build Tutorial | Include Images --
+        int toggleW = (fieldW - 6) / 2;
+        clickableButtons.add(new ClickableButton(fieldX, y, toggleW, 16,
+            UIText.of("ponderer.ui.ai_generate.build_tutorial") + ": " + (cachedBuildTutorial ? "ON" : "OFF"),
+            this::toggleBuildTutorial));
+        clickableButtons.add(new ClickableButton(fieldX + toggleW + 6, y, toggleW, 16,
+            UIText.of("ponderer.ui.ai_generate.include_images") + ": " + (cachedIncludeImages ? "ON" : "OFF"),
+            this::toggleIncludeImages));
         y += ROW_H + 4;
 
         // -- Status message area --
@@ -289,6 +302,20 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
         init(minecraft, width, height);
     }
 
+    // -- Toggle options --
+
+    private void toggleBuildTutorial() {
+        syncToCache();
+        cachedBuildTutorial = !cachedBuildTutorial;
+        init(minecraft, width, height);
+    }
+
+    private void toggleIncludeImages() {
+        syncToCache();
+        cachedIncludeImages = !cachedIncludeImages;
+        init(minecraft, width, height);
+    }
+
     // -- Generation --
 
     private void doGenerate() {
@@ -323,6 +350,7 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
 
         AiSceneGenerator.generate(
             new ArrayList<>(cachedStructurePaths), carrier, prompt, urls, null,
+            cachedBuildTutorial, cachedIncludeImages,
             filePath -> {
                 cachedGenerating = false;
                 cachedStatusMessage = UIText.of("ponderer.ui.ai_generate.status.success");
@@ -426,6 +454,9 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
             guiLeft + MARGIN, y - 10, 0xCCCCCC);
 
         y += cachedUrlValues.size() * ROW_H + ROW_H + 4;
+
+        // -- Toggle options (rendered via clickableButtons) --
+        y += ROW_H + 4;
 
         // -- Status --
         if (cachedStatusMessage != null) {

@@ -16,7 +16,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -56,6 +59,7 @@ public class AiSceneGenerator {
      */
     public static void generate(List<Path> structurePaths, String carrierItemId, String userPrompt,
                                  List<String> referenceUrls, String existingJson,
+                                 boolean buildTutorial, boolean includeImages,
                                  Consumer<String> onSuccess, Consumer<String> onError,
                                  Consumer<String> onStatus) {
         String apiKey = Config.AI_API_KEY.get().trim();
@@ -69,7 +73,7 @@ public class AiSceneGenerator {
                 // 1. Parse structures (fall back to built-in basic if none specified)
                 List<StructureDescriber.StructureInfo> structures = new ArrayList<>();
                 List<String> structureNames = new ArrayList<>();
-                List<String> allBlockTypes = new ArrayList<>();
+                Set<String> allBlockTypesSet = new LinkedHashSet<>();
 
                 if (structurePaths.isEmpty()) {
                     try (var is = SceneStore.openBuiltinStructure("basic")) {
@@ -77,7 +81,7 @@ public class AiSceneGenerator {
                             StructureDescriber.StructureInfo info = StructureDescriber.describe(is);
                             structures.add(info);
                             structureNames.add("ponderer:basic");
-                            allBlockTypes.addAll(info.blockTypes());
+                            allBlockTypesSet.addAll(info.blockTypes());
                         }
                     }
                 } else {
@@ -87,11 +91,10 @@ public class AiSceneGenerator {
                         String name = nbtPath.getFileName().toString();
                         if (name.endsWith(".nbt")) name = name.substring(0, name.length() - 4);
                         structureNames.add("ponderer:" + name);
-                        for (String bt : info.blockTypes()) {
-                            if (!allBlockTypes.contains(bt)) allBlockTypes.add(bt);
-                        }
+                        allBlockTypesSet.addAll(info.blockTypes());
                     }
                 }
+                List<String> allBlockTypes = new ArrayList<>(allBlockTypesSet);
 
                 // 2. Build structure description text (shared between both passes)
                 StringBuilder structDescBuf = new StringBuilder();
@@ -120,10 +123,15 @@ public class AiSceneGenerator {
                         webLogBuf.append("Text length: ").append(page.text().length())
                             .append(" chars, Images: ").append(page.images().size()).append("\n\n");
                         webLogBuf.append(page.text()).append("\n\n");
-                        for (WebPageFetcher.ImageData img : page.images()) {
-                            webContent.add(new LlmProvider.ContentBlock.Image(img.base64(), img.mediaType()));
-                            webLogBuf.append("[Image: ").append(img.mediaType())
-                                .append(", base64 length: ").append(img.base64().length()).append("]\n");
+                        if (includeImages) {
+                            for (WebPageFetcher.ImageData img : page.images()) {
+                                webContent.add(new LlmProvider.ContentBlock.Image(img.base64(), img.mediaType()));
+                                webLogBuf.append("[Image: ").append(img.mediaType())
+                                    .append(", base64 length: ").append(img.base64().length()).append("]\n");
+                            }
+                        } else {
+                            webLogBuf.append("[Images skipped (includeImages=false), count: ")
+                                .append(page.images().size()).append("]\n");
                         }
                         webLogBuf.append("\n");
                     } catch (Exception e) {
@@ -161,7 +169,7 @@ public class AiSceneGenerator {
                     "\n\nTarget item ID: " + carrierItemId +
                     "\nStructures: " + structuresStr));
 
-                String outline = llm.generate(buildOutlineSystemPrompt(), outlineContent,
+                String outline = llm.generate(buildOutlineSystemPrompt(buildTutorial), outlineContent,
                     baseUrl, apiKey, model).join();
                 LOGGER.info("Scene outline generated ({} chars)", outline.length());
                 writeLog("last_outline.log", outline);
@@ -172,47 +180,80 @@ public class AiSceneGenerator {
                 String registryMapping = RegistryMapper.buildMappingForDisplayNames(requiredElements, allBlockTypes);
                 writeLog("last_registry_mapping.log", registryMapping);
 
-                // ---- PASS 2: Generate JSON ----
+                // ---- PASS 2: Generate JSON (with retry on parse failure) ----
                 notifyStatus(onStatus, "Generating JSON (2/2)...");
 
-                List<LlmProvider.ContentBlock> jsonContent = new ArrayList<>();
-                jsonContent.add(new LlmProvider.ContentBlock.Text(structDesc));
-                jsonContent.add(new LlmProvider.ContentBlock.Text(registryMapping));
-                jsonContent.addAll(webContent);
-                if (existingJson != null && !existingJson.isBlank()) {
+                DslScene scene = null;
+                String json = null;
+                int parseAttempt = 0;
+
+                while (parseAttempt < 2 && scene == null) {
+                    parseAttempt++;
+                    if (parseAttempt == 2) {
+                        notifyStatus(onStatus, "JSON parse failed, retrying (attempt 2/2)...");
+                    }
+
+                    List<LlmProvider.ContentBlock> jsonContent = new ArrayList<>();
+                    jsonContent.add(new LlmProvider.ContentBlock.Text(structDesc));
+                    jsonContent.add(new LlmProvider.ContentBlock.Text(registryMapping));
+                    jsonContent.addAll(webContent);
+                    if (existingJson != null && !existingJson.isBlank()) {
+                        jsonContent.add(new LlmProvider.ContentBlock.Text(
+                            "=== Current scene JSON (modify based on instruction below) ===\n" + existingJson));
+                    }
                     jsonContent.add(new LlmProvider.ContentBlock.Text(
-                        "=== Current scene JSON (modify based on instruction below) ===\n" + existingJson));
+                        "=== Scene design outline (follow this plan) ===\n" + outline));
+
+                    // On retry, add error context
+                    if (parseAttempt == 2 && json != null) {
+                        jsonContent.add(new LlmProvider.ContentBlock.Text(
+                            "=== PREVIOUS ATTEMPT FAILED ===\n" +
+                            "Your previous JSON response was invalid or incomplete. Please generate a complete, " +
+                            "valid JSON DslScene object that can be parsed correctly.\n" +
+                            "First 500 chars of previous attempt:\n" + json.substring(0, Math.min(500, json.length()))));
+                    }
+
+                    jsonContent.add(new LlmProvider.ContentBlock.Text(
+                        "=== User instruction ===\n" + userPrompt +
+                        "\n\nTarget item ID: " + carrierItemId +
+                        "\nStructures: " + structuresStr));
+
+                    String response = llm.generate(buildSystemPrompt(buildTutorial), jsonContent,
+                        baseUrl, apiKey, model).join();
+
+                    // Extract and clean JSON from response
+                    LOGGER.info("Pass 2 attempt {} - Raw LLM response generated ({} chars)", parseAttempt, response.length());
+                    writeLog("last_json_response_attempt_" + parseAttempt + ".log", response);
+                    json = extractJson(response);
+                    json = cleanJson(json);
+                    writeLog("last_extracted_json_attempt_" + parseAttempt + ".log", json);
+
+                    // Try to parse
+                    try {
+                        scene = GSON.fromJson(json, DslScene.class);
+                        if (scene == null || scene.id == null || scene.id.isBlank()) {
+                            scene = null; // Force retry
+                            LOGGER.warn("Pass 2 attempt {}: Scene parsed but has no ID or is null", parseAttempt);
+                        } else {
+                            LOGGER.info("Pass 2 attempt {}: JSON parsed successfully", parseAttempt);
+                        }
+                    } catch (Exception parseEx) {
+                        LOGGER.warn("Pass 2 attempt {}: JSON parse failed - {}", parseAttempt, parseEx.getMessage());
+                        if (parseAttempt < 2) {
+                            LOGGER.info("Retrying JSON generation...");
+                        } else {
+                            LOGGER.error("Both JSON generation attempts failed. Last error: {}", parseEx.getMessage());
+                            writeLog("last_parse_error.log",
+                                "Both attempts failed.\n\n" +
+                                "Attempt 1 error: (check last_extracted_json_attempt_1.log)\n" +
+                                "Attempt 2 error: " + parseEx.getMessage() + "\n\nFinal extracted JSON:\n" + json);
+                            throw new RuntimeException("JSON generation failed after 2 attempts. Last error: " + parseEx.getMessage(), parseEx);
+                        }
+                    }
                 }
-                jsonContent.add(new LlmProvider.ContentBlock.Text(
-                    "=== Scene design outline (follow this plan) ===\n" + outline));
-                jsonContent.add(new LlmProvider.ContentBlock.Text(
-                    "=== User instruction ===\n" + userPrompt +
-                    "\n\nTarget item ID: " + carrierItemId +
-                    "\nStructures: " + structuresStr));
 
-                String response = llm.generate(buildSystemPrompt(), jsonContent,
-                    baseUrl, apiKey, model).join();
-
-                // 7. Extract and clean JSON from response
-                LOGGER.info("Raw LLM response generated ({} chars)", response.length());
-                writeLog("last_json_response.log", response);
-                String json = extractJson(response);
-                json = cleanJson(json);
-                writeLog("last_extracted_json.log", json);
-
-                // 8. Validate by parsing
-                DslScene scene;
-                try {
-                    scene = GSON.fromJson(json, DslScene.class);
-                } catch (Exception parseEx) {
-                    LOGGER.error("JSON parse failed. Extracted JSON ({} chars, first 200: {})",
-                        json.length(), json.substring(0, Math.min(200, json.length())));
-                    writeLog("last_parse_error.log",
-                        "Error: " + parseEx.getMessage() + "\n\nExtracted JSON:\n" + json);
-                    throw new RuntimeException("JSON parse failed: " + parseEx.getMessage(), parseEx);
-                }
-                if (scene == null || scene.id == null || scene.id.isBlank()) {
-                    throw new RuntimeException("Generated scene has no ID");
+                if (scene == null) {
+                    throw new RuntimeException("Failed to generate valid scene after 2 attempts");
                 }
 
                 // 9. Pretty-print and save
@@ -235,7 +276,8 @@ public class AiSceneGenerator {
             PondererClientCommands.reloadLocal();
             onSuccess.accept(filePath);
         }, Minecraft.getInstance()).exceptionally(ex -> {
-            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+            Throwable cause = ex;
+            while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
             LOGGER.error("AI scene generation failed", cause);
             String msg = cause.getMessage();
             if (msg == null) msg = cause.getClass().getSimpleName();
@@ -250,10 +292,10 @@ public class AiSceneGenerator {
         Minecraft.getInstance().execute(() -> onStatus.accept(message));
     }
 
-    /** Write content to a log file under config/ponderer/prompts/ for debugging. */
+    /** Write content to a log file under config/ponderer/logs/ for debugging. */
     private static void writeLog(String fileName, String content) {
         try {
-            Path file = getPromptsDir().resolve(fileName);
+            Path file = getLogsDir().resolve(fileName);
             Files.createDirectories(file.getParent());
             Files.writeString(file, content, StandardCharsets.UTF_8);
         } catch (Exception e) {
@@ -264,16 +306,35 @@ public class AiSceneGenerator {
     /**
      * Parse the REQUIRED_ELEMENTS line from the outline.
      * Expected format (on its own line): {@code REQUIRED_ELEMENTS: Piston, Lever, minecraft:zombie}
+     * Tolerates common LLM formatting variants: bold markers (**), extra spaces,
+     * underscores vs spaces, mixed case, trailing punctuation, etc.
      * Returns an empty list if the line is absent.
      */
     private static List<String> parseRequiredElements(String outline) {
         for (String line : outline.split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("REQUIRED_ELEMENTS:")) {
-                String rest = trimmed.substring("REQUIRED_ELEMENTS:".length()).trim();
+            // Strip markdown bold/italic markers and leading/trailing whitespace
+            // NOTE: do NOT strip underscores — they appear in "REQUIRED_ELEMENTS" and registry IDs
+            String cleaned = line.trim().replaceAll("[*`#>]", "").trim();
+            // Normalize to uppercase, collapse spaces, strip possible dash prefix ("- REQUIRED_ELEMENTS:")
+            String upper = cleaned.toUpperCase(Locale.ROOT).replaceAll("^[-\\s]+", "");
+            // Match "REQUIRED_ELEMENTS" or "REQUIRED ELEMENTS" with optional underscore/space,
+            // followed by optional colon/equals
+            if (upper.startsWith("REQUIRED_ELEMENTS") || upper.startsWith("REQUIRED ELEMENTS")) {
+                // Find where the key ends — skip past the label and separator
+                int idx = cleaned.indexOf(':');
+                if (idx < 0) idx = cleaned.indexOf('=');
+                if (idx < 0) {
+                    // Try to find the split after "REQUIRED_ELEMENTS" or "REQUIRED ELEMENTS"
+                    idx = upper.startsWith("REQUIRED_ELEMENTS") ? "REQUIRED_ELEMENTS".length()
+                        : "REQUIRED ELEMENTS".length();
+                    // Skip trailing whitespace/punctuation after the label
+                    while (idx < cleaned.length() && ":= \t".indexOf(cleaned.charAt(idx)) >= 0) idx++;
+                    idx--; // will be incremented below
+                }
+                String rest = cleaned.substring(idx + 1).trim();
                 if (rest.isEmpty()) return List.of();
                 List<String> result = new ArrayList<>();
-                for (String part : rest.split(",")) {
+                for (String part : rest.split("[,;、]")) {
                     String s = part.trim();
                     if (!s.isEmpty()) result.add(s);
                 }
@@ -288,17 +349,16 @@ public class AiSceneGenerator {
         String trimmed = response.trim();
 
         // Strip markdown code fences: ```json ... ```, ```JSON ... ```, ``` ... ```
-        int fenceStart = trimmed.indexOf("```json");
-        if (fenceStart < 0) fenceStart = trimmed.indexOf("```JSON");
-        if (fenceStart < 0) fenceStart = trimmed.indexOf("```");
-        if (fenceStart >= 0) {
-            int contentStart = trimmed.indexOf('\n', fenceStart);
-            if (contentStart >= 0) {
-                contentStart++;
-                int fenceEnd = trimmed.indexOf("```", contentStart);
-                if (fenceEnd > contentStart) {
-                    trimmed = trimmed.substring(contentStart, fenceEnd).trim();
-                }
+        // Use regex to match ```json (case-insensitive) or plain ``` at line start,
+        // avoiding false matches like ```javascript or ```jsonl
+        java.util.regex.Matcher fenceMatcher = java.util.regex.Pattern.compile(
+            "```(?:json|JSON)?\\s*\\n", java.util.regex.Pattern.MULTILINE
+        ).matcher(trimmed);
+        if (fenceMatcher.find()) {
+            int contentStart = fenceMatcher.end();
+            int fenceEnd = trimmed.indexOf("```", contentStart);
+            if (fenceEnd > contentStart) {
+                trimmed = trimmed.substring(contentStart, fenceEnd).trim();
             }
         }
 
@@ -342,11 +402,40 @@ public class AiSceneGenerator {
         return trimmed;
     }
 
-    /** Clean common LLM JSON issues: trailing commas, single-line comments outside strings. */
+    /** Clean common LLM JSON issues: trailing commas before } or ] (string-aware). */
     private static String cleanJson(String json) {
-        json = json.replaceAll(",\\s*}", "}");
-        json = json.replaceAll(",\\s*]", "]");
-        return json;
+        StringBuilder sb = new StringBuilder(json.length());
+        boolean inString = false;
+        boolean escape = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escape) {
+                escape = false;
+                sb.append(c);
+                continue;
+            }
+            if (c == '\\' && inString) {
+                escape = true;
+                sb.append(c);
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+                sb.append(c);
+                continue;
+            }
+            if (!inString && c == ',') {
+                // Look ahead: skip whitespace, check if next non-ws char is } or ]
+                int j = i + 1;
+                while (j < json.length() && Character.isWhitespace(json.charAt(j))) j++;
+                if (j < json.length() && (json.charAt(j) == '}' || json.charAt(j) == ']')) {
+                    // Skip this trailing comma (don't append it)
+                    continue;
+                }
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     // -------------------------------------------------------------------------
@@ -358,6 +447,10 @@ public class AiSceneGenerator {
 
     private static Path getPromptsDir() {
         return FMLPaths.CONFIGDIR.get().resolve("ponderer").resolve("prompts");
+    }
+
+    private static Path getLogsDir() {
+        return FMLPaths.CONFIGDIR.get().resolve("ponderer").resolve("logs");
     }
 
     /**
@@ -380,12 +473,216 @@ public class AiSceneGenerator {
         return defaultContent;
     }
 
-    private static String buildOutlineSystemPrompt() {
-        return loadOrCreatePrompt(OUTLINE_PROMPT_FILE, getDefaultOutlineSystemPrompt());
+    private static final String BUILD_TUTORIAL_PLACEHOLDER = "{{BUILD_TUTORIAL}}";
+
+    private static final String BUILD_TUTORIAL_CONTENT = """
+
+              ## MANDATORY: Build Tutorial as First Scene Segment
+              The FIRST scene segment MUST be a step-by-step layer-by-layer build tutorial. This is NOT optional. Do NOT skip this. Do NOT merge it into other segments.
+
+              **Structure of the first scene segment (BUILD TUTORIAL):**
+              The first scene segment's ONLY purpose is to show the structure being built layer by layer from bottom to top.
+              1. show_structure — render the FULL structure
+              2. (Optional) text — a brief overview sentence about the structure while it's fully visible (e.g. "This is a large multiblock structure"), followed by idle
+              3. hide_section covering ALL blocks from Y=1 to Y=max (direction "up") — so ONLY the Y=0 base layer is visible
+              4. text explaining the base layer (Y=0) → idle
+              5. show_section_and_merge for Y=1 layer (direction "down") → text explaining Y=1 → idle
+              6. show_section_and_merge for Y=2 layer (direction "down") → text explaining Y=2 → idle
+              7. Continue for EVERY remaining Y layer until the full structure is visible again
+
+              **CRITICAL RULES:**
+              - You MUST hide ALL layers above Y=0 first, then reveal them ONE BY ONE from bottom to top
+              - EVERY distinct Y level MUST get its own show_section_and_merge step. Do NOT skip any Y level.
+              - If two adjacent Y layers have identical block patterns, you may combine them into ONE show_section_and_merge covering both Y levels, but you must still show them — never skip.
+              - Each layer reveal MUST be followed by text annotation explaining what blocks are at that layer, then idle
+              - Since the default camera sees the north+west faces, start annotations on those faces. Use rotate_camera_y (positive = clockwise from above) if ports/details are on the hidden south/east side.
+              - The first scene segment contains ONLY the build tutorial. All other content (operation, usage, etc.) goes in subsequent scene segments.
+
+              **Example for a 6-layer structure (Y=0 to Y=5):**
+              Scene segment 1 ("Build Tutorial" / "搭建教程"):
+                step 1: show_structure (full)
+                step 2: text "This is a large multiblock structure" (optional overview)
+                step 3: idle 60
+                step 4: hide_section blockPos=[0,1,0] blockPos2=[maxX, 5, maxZ] direction="up"  ← hides Y=1 through Y=5
+                step 5: text "Base layer: ..." pointing at Y=0
+                step 6: idle 60
+                step 7: show_section_and_merge blockPos=[0,1,0] blockPos2=[maxX,1,maxZ] direction="down"  ← reveals Y=1
+                step 8: text "Y=1 layer: ..." pointing at Y=1
+                step 9: idle 60
+                step 10: show_section_and_merge blockPos=[0,2,0] blockPos2=[maxX,2,maxZ] direction="down"  ← reveals Y=2
+                step 11: text "Y=2 layer: ..."
+                step 12: idle 60
+                ... continue for Y=3, Y=4, Y=5 ...
+
+              Then scene segment 2, 3, etc. contain the normal operation/usage tutorial.
+            """;
+
+    private static final String EXAMPLE_PLACEHOLDER = "{{EXAMPLE}}";
+
+    /** Example for multi-block structures with build tutorial (buildTutorial=true) */
+    private static final String MULTIBLOCK_EXAMPLE = """
+            ## Example Output
+            Below is a real example showing correct JSON structure for a Mekanism fission reactor with build tutorial.
+            Adapt the pattern to your actual structure.
+            ```json
+            {
+              "id": "ponderer:fission_reactor",
+              "items": ["mekanismgenerators:fission_reactor_port"],
+              "title": {"en_us": "Fission Reactor", "zh_cn": "裂变反应堆"},
+              "structures": ["ponderer:gen"],
+              "tags": [],
+              "steps": [],
+              "scenes": [
+                {
+                  "id": "build_tutorial",
+                  "title": {"en_us": "Construction Guide", "zh_cn": "搭建教程"},
+                  "steps": [
+                    {"type": "show_structure", "structure": "ponderer:gen", "attachKeyFrame": true},
+                    {"type": "text", "duration": 60, "text": {"en_us": "The fission reactor is a large multiblock structure", "zh_cn": "裂变反应堆是一个大型多方块结构"}, "point": [1.5,3.5,1.0], "color": "blue", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "hide_section", "direction": "up", "blockPos": [0,1,0], "blockPos2": [6,5,6]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Base layer: grass blocks and dirt frame", "zh_cn": "地基层：草方块和泥土"}, "point": [0.5,0.0,0.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_section_and_merge", "direction": "down", "linkId": "layer_y1", "blockPos": [0,1,0], "blockPos2": [6,1,6], "attachKeyFrame": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Y=1 layer: reactor casing frame and creative tanks", "zh_cn": "Y=1 层：裂变反应堆外壳框架和存储介质"}, "point": [1.0,1.5,1.5], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_section_and_merge", "direction": "down", "linkId": "layer_y2", "blockPos": [0,2,0], "blockPos2": [6,2,6]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Y=2 layer: reactor ports, fuel assemblies, reactor glass, and pipe connections", "zh_cn": "Y=2 层：裂变反应堆端口、燃料组件、强化玻璃和管道接口"}, "point": [1.0,2.5,1.5], "color": "blue", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_section_and_merge", "direction": "down", "linkId": "layer_y3", "blockPos": [0,3,0], "blockPos2": [6,3,6]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Y=3 layer: fuel assemblies and reactor glass (middle layer)", "zh_cn": "Y=3 层：裂变燃料组件和强化玻璃（中层）"}, "point": [1.0,3.5,1.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_section_and_merge", "direction": "down", "linkId": "layer_y4", "blockPos": [0,4,0], "blockPos2": [6,4,6]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Y=4 layer: control rod assemblies and reactor glass (above fuel)", "zh_cn": "Y=4 层：控制棒组件和强化玻璃（控制棒顶部）"}, "point": [1.0,4.5,1.5], "color": "blue", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_section_and_merge", "direction": "down", "linkId": "layer_y5", "blockPos": [0,5,0], "blockPos2": [6,5,6]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Y=5 layer: reactor casing roof (construction complete)", "zh_cn": "Y=5 层：裂变反应堆外壳顶部（完成搭建）"}, "point": [1.0,5.5,1.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60}
+                  ]
+                },
+                {
+                  "id": "port_modes",
+                  "title": {"en_us": "Port Modes & Fluid Transfer", "zh_cn": "端口模式与流体传输"},
+                  "steps": [
+                    {"type": "show_structure", "structure": "ponderer:gen", "attachKeyFrame": true},
+                    {"type": "rotate_camera_y", "degrees": -90},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 40, "text": {"en_us": "Fission reactor ports have three working modes", "zh_cn": "裂变反应堆端口有三种工作模式"}, "point": [1.0,2.5,2.5], "color": "blue", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_controls", "duration": 40, "point": [1.0,2.5,2.0], "direction": "right", "action": "right", "item": "mekanism:configurator", "attachKeyFrame": true},
+                    {"type": "text", "duration": 40, "text": {"en_us": "Right-click with configurator to switch port mode", "zh_cn": "右键用扳手点击端口可切换模式"}, "point": [1.0,2.5,2.5], "color": "input", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Input mode: receives fission fuel and coolant", "zh_cn": "输入模式：接收裂变燃料和冷却液"}, "point": [1.0,2.5,4.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "show_controls", "duration": 50, "point": [1.0,2.5,4.5], "direction": "down", "item": "minecraft:water"},
+                    {"type": "show_controls", "duration": 50, "point": [1.0,2.5,2.5], "direction": "down", "item": "mekanism:fissile_fuel"},
+                    {"type": "idle", "duration": 60},
+                    {"type": "rotate_camera_y", "degrees": 90},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Output waste mode: outputs nuclear waste", "zh_cn": "输出废料模式：输出核废料"}, "point": [2.5,2.5,1.0], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "show_controls", "duration": 50, "point": [2.5,2.5,1.0], "direction": "down", "item": "mekanism:nuclear_waste"},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Output coolant mode: outputs heated coolant", "zh_cn": "输出冷却剂模式：输出冷却剂"}, "point": [4.5,2.5,1.0], "color": "blue", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "show_controls", "duration": 50, "point": [4.5,2.5,1.0], "direction": "down", "item": "mekanism:water_vapor"},
+                    {"type": "idle", "duration": 60}
+                  ]
+                }
+              ]
+            }
+            ```
+            Note the key patterns in this example:
+            - Build tutorial: show_structure → overview text → hide upper layers → reveal layer by layer with text annotations
+            - Optional overview text BEFORE hide_section to give context about the structure
+            - show_controls WITH action="right" + item for player interaction (configurator right-click)
+            - show_controls WITHOUT action for machine I/O indicator (water, fissile_fuel, nuclear_waste as port indicators)
+            - Multiple show_controls can run simultaneously to show multiple I/O ports at once
+            - Default idle duration is 60 ticks; text/show_controls duration is typically 50 ticks
+            - zh_cn text is natural Chinese, not translated from English
+            """;
+
+    /** Example for single block / item introduction (buildTutorial=false) */
+    private static final String SINGLE_BLOCK_EXAMPLE = """
+            ## Example Output
+            Below is a real example showing correct JSON structure for a Botania Endoflame introduction (no build tutorial).
+            Adapt the pattern to your actual block/item.
+            ```json
+            {
+              "id": "ponderer:endoflame_tutorial",
+              "items": ["botania:endoflame"],
+              "title": {"en_us": "Endoflame - Mana Generation", "zh_cn": "火红莲 - 魔力生成"},
+              "structures": ["ponderer:basic"],
+              "tags": [],
+              "steps": [],
+              "scenes": [
+                {
+                  "id": "endoflame_fuel_burning",
+                  "title": {"en_us": "Fuel Burning & Mana Generation", "zh_cn": "燃烧燃料和魔力生成"},
+                  "steps": [
+                    {"type": "show_structure", "structure": "ponderer:basic", "attachKeyFrame": true},
+                    {"type": "set_block", "block": "minecraft:grass_block", "blockPos": [4,0,0], "blockPos2": [0,0,4]},
+                    {"type": "set_block", "block": "botania:endoflame", "blockPos": [2,1,2], "attachKeyFrame": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame flower generates mana by burning fuel items.", "zh_cn": "火红莲通过燃烧物品产生魔力。"}, "point": [2.5,1.5,2.0], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,0.0,0.0], "count": 1, "item": "minecraft:coal", "attachKeyFrame": true},
+                    {"type": "text", "duration": 60, "text": {"en_us": "Drop fuel items near the flower. It automatically picks them up and starts burning.", "zh_cn": "将燃料物品放在花附近。它会自动捡起并开始燃烧。"}, "point": [1.5,0.0,2.5], "color": "blue", "placeNearTarget": true},
+                    {"type": "idle", "duration": 20},
+                    {"type": "clear_item_entities", "fullScene": true},
+                    {"type": "play_sound", "pitch": 1.0, "sound": "minecraft:block.fire.ambient", "soundVolume": 0.6},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Coal burns for about 800 ticks (~40 seconds), generating roughly 1200 mana.", "zh_cn": "煤炭的燃烧耗时为 800 tick，约 40 秒，产生魔力约 1200 mana。"}, "point": [2.5,1.5,2.5], "color": "white", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame has an internal mana buffer of 300 mana maximum.", "zh_cn": "火红莲内部缓存最多 300 mana。"}, "point": [2.5,1.5,2.5], "color": "blue", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "It must be connected to mana devices to output mana and function properly.", "zh_cn": "它必须连接到魔力设备以输出魔力并正常工作。"}, "point": [0.5,1.0,2.5], "color": "red", "placeNearTarget": true},
+                    {"type": "set_block", "block": "botania:mana_spreader", "blockPos": [1,1,2], "attachKeyFrame": true},
+                    {"type": "set_block", "block": "botania:mana_pool", "blockPos": [0,1,2], "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Place a mana pool within the flower's detection range to accept generated mana.", "zh_cn": "在花的检测范围内放置魔力发射器以接收生成的魔力。"}, "point": [1.5,1.0,2.5], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "rotate_camera_y", "degrees": 90, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 20},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The operating range is 7×7×7 blocks centered on the flower.", "zh_cn": "工作范围为以花为中心的 7×7×7 区域。"}, "point": [2.5,1.5,2.5], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "item": "minecraft:charcoal", "attachKeyFrame": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Different fuels have different burn times. Charcoal burns similarly to coal.", "zh_cn": "不同燃料有不同的燃烧耗时。木炭的燃烧时间与煤炭相似。"}, "point": [2.5,2.0,2.5], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "count": 1, "item": "minecraft:coal_block", "attachKeyFrame": true},
+                    {"type": "text", "duration": 60, "text": {"en_us": "Coal blocks burn for ~8000 ticks, generating up to 24000 mana maximum per fuel.", "zh_cn": "煤炭块燃烧耗时约 8000 tick，产生 24000 mana（单个燃料上限）。"}, "point": [2.5,1.5,2.5], "color": "blue", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "clear_item_entities", "fullScene": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame cannot burn items with container data, such as lava buckets.", "zh_cn": "火红莲不会燃烧有容器数据的物品，如熔岩桶。"}, "point": [2.5,1.5,2.5], "color": "red", "placeNearTarget": true},
+                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "count": 1, "item": "minecraft:lava_bucket", "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "clear_item_entities", "fullScene": true},
+                    {"type": "rotate_camera_y", "degrees": -90, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 20},
+                    {"type": "indicate_success", "blockPos": [2,1,2], "attachKeyFrame": true},
+                    {"type": "text", "duration": 60, "text": {"en_us": "Despite being the cheapest active mana generator, Endoflame's efficiency exceeds most passive generators.", "zh_cn": "即使是最廉价的主动产能花，火红莲的效率仍优于大多数被动产能花。"}, "point": [2.5,1.5,2.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60}
+                  ]
+                }
+              ]
+            }
+            ```
+            Note the key patterns in this example:
+            - No build tutorial — starts directly with functional demonstration
+            - set_block with blockPos + blockPos2 to replace floor, then set_block to place the target block — adapts ponderer:basic structure for the scene
+            - play_sound to add audio feedback at key moments (fire burning)
+            - Specific numbers in text (800 ticks, 1200 mana, 300 buffer) — focus on KEY NUMBERS for single blocks
+            - create_item_entity + clear_item_entities to show item consumption cycle; short rapid-fire item demos can omit intermediate clear
+            - Default idle duration is 60 ticks; text duration is typically 50 ticks
+            - Single scene segment is valid when the content flows naturally without topic resets
+            - zh_cn text is natural Chinese, not translated from English
+            """;
+
+    private static String buildOutlineSystemPrompt(boolean buildTutorial) {
+        String prompt = loadOrCreatePrompt(OUTLINE_PROMPT_FILE, getDefaultOutlineSystemPrompt());
+        return prompt.replace(BUILD_TUTORIAL_PLACEHOLDER,
+            buildTutorial ? BUILD_TUTORIAL_CONTENT : "");
     }
 
-    private static String buildSystemPrompt() {
-        return loadOrCreatePrompt(JSON_PROMPT_FILE, getDefaultJsonSystemPrompt());
+    private static String buildSystemPrompt(boolean buildTutorial) {
+        String prompt = loadOrCreatePrompt(JSON_PROMPT_FILE, getDefaultJsonSystemPrompt());
+        return prompt.replace(EXAMPLE_PLACEHOLDER,
+            buildTutorial ? MULTIBLOCK_EXAMPLE : SINGLE_BLOCK_EXAMPLE);
     }
 
     private static String getDefaultOutlineSystemPrompt() {
@@ -406,18 +703,60 @@ public class AiSceneGenerator {
             - **Machines/multi-block structures**: Focus on OPERATIONAL STEPS (input → processing → output). Show how to use it step-by-step. Technical numbers are secondary (mention key values only if they directly affect the workflow).
             - Note: This is a relative emphasis, not absolute — blocks may still show basic usage, machines may still mention important metrics. The split is about which aspect matters most to the player learning the content.
 
+            ## Version Handling
+            When reference material (e.g. wiki pages) contains descriptions for MULTIPLE versions of the same mechanic (e.g. "Before 1.18" vs "After 1.18", or "Legacy" vs "Current"), always use the LATEST / MOST RECENT version's description. Ignore outdated version info unless the user explicitly asks about an older version.
+
             Scene segmentation rules:
             - A scene segment is a "page" with its own show_structure + step sequence. Only create a NEW segment when there is a major topic shift or scene reset (e.g. switching from "introduction" to "advanced usage", or resetting the structure to show a different configuration).
             - Do NOT create a new segment for every small idea. Continuous flow within one topic should stay in one segment with many steps.
-            - Typical scene: 1-3 segments, each with 8-20+ steps. Avoid many short segments (e.g. 5 segments with 3 steps each).
+            - Typical scene: 1-4 segments, each with 8-20+ steps. Avoid many short segments (e.g. 5 segments with 3 steps each). Simple blocks may need only 1-2 segments; complex multiblock machines can justify 3-4 segments.
+            """ + BUILD_TUTORIAL_PLACEHOLDER + """
+
+            ## Duration Guidelines
+            - Default idle duration: 60 ticks (3 seconds). Use this between most content steps.
+            - Default text/show_controls duration: 50 ticks.
+            - Short idle (10-20 ticks) is allowed for rapid consecutive small operations (e.g. between set_block and the text that annotates it, or between show_section_and_merge and its layer text).
 
             Visual-first ordering:
             - When introducing a block or item, FIRST place it (set_block) or spawn it (create_item_entity), THEN show the text annotation.
-            - Pattern: set_block/create_item_entity → idle (short) → text → idle (text duration)
+            - Pattern: set_block/create_item_entity → text → idle 60
+
+            ## CRITICAL: Show, Don't Tell
+            Ponder scenes are VISUAL DEMONSTRATIONS, not text lectures.
+            The player watches a 3D scene — they want to SEE things happen, not just read descriptions.
+
+            **Step 1 — Extract all items**: Before writing the outline, scan ALL input text (user instruction, reference material, structure info) and extract every concrete item mentioned: blocks, items, fluids, gases, chemicals, entities, tools, etc. Then plan to VISUALLY SHOW each extracted item using the appropriate step type:
+            - Blocks → set_block to place them in the scene
+            - Mobs/entities → create_entity to spawn them
+            - Dropped items (fuel, ingredients, products) → create_item_entity to show them
+            - Machine I/O substances (fluids, gases, items piped in/out) → show_controls at the relevant port
+            - Tools/interaction items → show_controls with action
+            Only omit an extracted item if you are confident it is irrelevant noise (e.g. unrelated sidebar content from a wiki page). When in doubt, show it.
+
+            **Step 2 — Visual storytelling rules:**
+            - When mentioning a block/item, SHOW it: use set_block to place it, or create_item_entity to spawn it. Use indicate_redstone for power flows; save indicate_success for major conclusions only.
+            - When explaining a crafting recipe or result, use create_item_entity to spawn the items visually
+            - When explaining player interaction, use show_controls to display the mouse action (left-click, right-click, scroll)
+            - **CRITICAL**: When your text mentions "use [item] with left/right click" (e.g. "右键使用扳手", "left-click with pickaxe"), you MUST use show_controls with BOTH the "action" field ("left"/"right") AND the "item" field set to that item's registry ID. The action field is REQUIRED for player interactions — do NOT omit it.
+            - When explaining redstone mechanics, use toggle_redstone_power to actually toggle levers/lamps/pistons so the player sees the state change
+            - When explaining a building process, use set_block step-by-step to place blocks one at a time or layer by layer, rather than describing it in text
+            - **When a machine inputs/outputs items, fluids, gases, or any substance through a port/pipe/interface** (NOT as a dropped item in the world): use show_controls with the item field set to the substance's registry ID, pointing at the input/output port. Then add a text step labeling it as "Input: ..." or "Output: ...". This covers items inserted into machines, fluids piped in/out, gases (e.g. Mekanism hydrogen/oxygen/steam), chemicals, etc. The show_controls item field supports ALL registry types.
+            - **When items exist physically in the world** (dropped items, items on the ground, items flying out of a machine): use create_item_entity to spawn them, and clear_item_entities to remove them when consumed.
+            - Text steps should ANNOTATE what the player is seeing, not replace visual demonstration. Keep text SHORT (one sentence).
+            - A good ratio: for every 1 text step, have at least 1-2 visual action steps (set_block, toggle_redstone_power, create_item_entity, show_controls, etc.)
+            - Use rotate_camera_y when the interesting part is on a different side of the structure
+            - Use destroy_block + set_block pairs to show "replace this block with that block" visually
+            - **Item entity lifecycle**: When showing multiple items in sequence (e.g. different I/O demonstrations), ALWAYS clear_item_entities before spawning the next item. Pattern: create_item_entity → (use it) → clear_item_entities → create_item_entity (next demo) → ... → clear_item_entities (final cleanup)
+            - **show_controls + text explanation pattern**: After a show_controls step, follow with idle → text step explaining what the control does. Pattern: show_controls → idle → text annotation
+
+            **Bad example** (text-only, avoid this):
+            1. show_structure → 2. text "Place a lever on the block" → 3. idle → 4. text "The lever powers the lamp" → 5. idle → 6. text "The lamp turns on"
+
+            **Good example** (visual-first demonstration):
+            1. show_structure → 2. set_block lever → 3. idle → 4. text "Place a lever here" → 5. idle → 6. show_controls right-click → 7. toggle_redstone_power lever → 8. idle → 9. text "The lamp turns on!" → 10. indicate_success lamp_pos
 
             Key constraints to respect in your plan:
             - Floor awareness: read the structure's Y-layer layout to identify the floor Y. Plan set_block placements at floor_Y + 1 or higher — never on the floor itself.
-            - Text overlap: each text label lasts for its duration. Plan idles between consecutive text steps (≥ previous text's duration), or use vertically separated points so labels don't collide.
             - Default structure (ponderer:basic): if no user NBT is provided, plan replace_blocks/set_block steps early to adapt the plain stone platform to the scene's theme.
 
             Available step types:
@@ -428,10 +767,38 @@ public class AiSceneGenerator {
 
             Coordinate system: X=east(+)/west(-), Y=up(+)/down(-), Z=south(+)/north(-). [0,0,0] = bottom-north-west corner.
 
-            At the very end of your response, on its own line, list every block, item, entity, and sound you plan to reference:
+            ## Camera Awareness
+            The default camera looks from the NORTHWEST corner toward the SOUTHEAST.
+            Visible faces: **north face (Z=0)** and **west face (low X / X=0)**.
+            Hidden faces: south face (high Z) and east face (high X).
+
+            Rules:
+            - Text annotations and key visual actions should target blocks on the VISIBLE side (low Z or low X faces) so the player can actually see them.
+            - If you need to show something on the hidden side (south or east face), FIRST rotate_camera_y to bring that side into view, THEN place text/actions there.
+            - rotate_camera_y positive = clockwise from above. +90° reveals the east face (high X). -90° reveals the south face (high Z). +180° shows the back (southeast corner).
+            - After rotating, remember subsequent text/actions are from the new angle. Rotate back when switching to a different topic if needed.
+            - **Prefer placing annotations and key interactions on the north (Z=0) face** — this is the primary visible face. Only use rotate_camera_y when the relevant blocks are genuinely on the hidden side.
+
+            At the very end of your response, on its own line, list every block, item, fluid, chemical, entity, and sound you plan to reference:
             REQUIRED_ELEMENTS: <comma-separated list>
 
-            Use display names for blocks/items in the SAME LANGUAGE as the user instruction (e.g. if the user writes Chinese, use "活塞", "红石灯"; if English, use "Piston", "Redstone Lamp").
+            **CRITICAL**: The REQUIRED_ELEMENTS list MUST include ALL substances mentioned in your outline:
+            - Blocks you plan to place/reference (e.g. 活塞, Piston)
+            - Items shown as drops or in show_controls (e.g. 铁锭, Iron Ingot)
+            - **Fluids** piped in/out of machines (e.g. 水, Water, 熔岩, Lava)
+            - **Gases and chemicals** from mods like Mekanism (e.g. 氢气, Hydrogen, 氧气, Oxygen, 蒸汽, Steam)
+            - Entities spawned (e.g. minecraft:zombie)
+            - Sounds played (e.g. minecraft:block.piston.extend)
+            If your outline mentions a machine that processes/inputs/outputs a fluid, gas, or chemical, that substance MUST appear in REQUIRED_ELEMENTS. Missing elements will cause ID resolution to fail silently.
+
+            ## Localization Quality Rules
+            When generating zh_cn (Chinese) text content:
+            - Write NATURAL, fluent Chinese directly. Do NOT think in English first and then translate — this produces unnatural "翻译腔" (translation-ese).
+            - **Preserve proper nouns exactly**: Block names, item names, fluid names, chemical names, entity names, and mod names must use their ORIGINAL Chinese display names from the game (e.g. "活塞" not "推动装置", "红石灯" not "由红石供能的灯").
+            - If the user prompt or reference material contains Chinese names for blocks/items, use those EXACT names in your text — do NOT paraphrase or re-translate them.
+            - Keep text concise and game-appropriate. Use the tone of Minecraft wiki or in-game tutorials, not academic or literary Chinese.
+
+            Use display names for blocks/items/fluids/chemicals in the SAME LANGUAGE as the user instruction (e.g. if the user writes Chinese, use "活塞", "红石灯", "水"; if English, use "Piston", "Redstone Lamp", "Water").
             For modded content you may also use the ID path without namespace (e.g. "endoflame" instead of full "botania:endoflame") — this is more reliable than guessing display names.
             For entities use registry IDs (e.g. "minecraft:zombie", "minecraft:villager").
             For sounds use registry IDs (e.g. "minecraft:block.piston.extend", "minecraft:block.lever.click").
@@ -467,7 +834,7 @@ public class AiSceneGenerator {
             - "title": {"en_us": "...", "zh_cn": "..."} - Segment title shown in the scene navigation bar
             - "steps": array of step objects executed sequentially
 
-            ## Step Types — Detailed Reference
+            ## Step Types — Detailed Reference (ordered by frequency of use)
 
             Every step is a JSON object with a "type" field and type-specific parameters.
             The optional field "attachKeyFrame" (bool) can be added to ANY step to mark it as a timeline keyframe (the player can click the timeline to jump here).
@@ -484,16 +851,16 @@ public class AiSceneGenerator {
             ---
             ### 2. idle
             **Purpose**: Pauses the scene for a given number of ticks. Gives the player time to read text or observe animations.
-            **When to use**: Between almost every other step. Without idle steps, everything would happen instantaneously. Use 20-40 ticks (1-2 seconds) after text, 5-10 ticks between quick operations.
+            **When to use**: Between almost every other step. Without idle steps, everything would happen instantaneously. Default idle is 60 ticks (3 seconds). Use shorter idles (10-20 ticks) for rapid consecutive small operations (e.g. between a block placement and its text annotation).
             **Fields**:
             - duration (int, optional, default 20): pause length in game ticks (20 ticks = 1 second)
-            **Example**: {"type":"idle", "duration":30}
+            **Example**: {"type":"idle", "duration":60}
 
             ---
             ### 3. text
             **Purpose**: Shows a floating text tooltip in the 3D scene, pointing at a specific location. This is the primary way to explain things to the player.
             **When to use**: Whenever you need to annotate, explain, or call attention to a block or area. Combine with placeNearTarget to make the text float near the pointed block.
-            **IMPORTANT — overlap**: a text label stays visible for exactly "duration" ticks. If a second text step starts before the first one expires (idle gap < first duration), both labels render simultaneously and collide on screen. Prevent this by: (a) inserting an idle ≥ previous text's duration before the next text step, or (b) using a "point" with ≥ 2-block Y difference so the two labels are vertically separated.
+            **IMPORTANT — overlap**: a text label stays visible for exactly "duration" ticks. With the standard 50-tick text duration and 60-tick idle, there is a natural 10-tick gap preventing overlap. If using non-standard durations, ensure the idle between consecutive text steps is at least as long as the previous text's duration, or use "point" coordinates with ≥ 2-block Y difference so labels are vertically separated.
             **Fields**:
             - text (LocalizedText, required): {"en_us":"English text", "zh_cn":"中文文本"}
             - point (float[3], required): the 3D coordinate the text points at. Use x.5 values to point at block centers (e.g. [2.5, 1.5, 3.5] = center of block at [2,1,3])
@@ -503,60 +870,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"text", "text":{"en_us":"This lever controls the piston","zh_cn":"这个拉杆控制活塞"}, "point":[2.5,2.5,3.5], "duration":60, "color":"green", "placeNearTarget":true, "attachKeyFrame":true}
 
             ---
-            ### 4. shared_text
-            **Purpose**: Like text, but references a pre-defined lang key instead of inline text. Used for reusable/standardized messages.
-            **When to use**: When referencing a built-in or shared localization key that already exists in the lang files. (Not Suggested)
-            **Fields**:
-            - key (string, required): lang file key (e.g. "ponderer.scene.redstone.power_on")
-            - point (float[3], required): 3D coordinate the text points at
-            - duration (int, optional, default 40): display duration in ticks
-            - color (string, optional): same color options as text
-            - placeNearTarget (bool, optional): float near target position
-            **Example**: {"type":"shared_text", "key":"ponderer.scene.tip.right_click", "point":[3.5,1.5,2.5], "duration":40, "placeNearTarget":true}
-
-            ---
-            ### 5. rotate_camera_y
-            **Purpose**: Smoothly rotates the camera around the Y (vertical) axis. Gives the player a different viewing angle of the structure.
-            **When to use**: When you want to show the build from a different side, or create a cinematic rotation effect. Use after showing an initial view and before explaining something on the other side.
-            **Fields**:
-            - degrees (float, optional, default 90): rotation angle in degrees. Positive = clockwise when viewed from above. Use 90 for quarter turn, 180 for half turn.
-            **Example**: {"type":"rotate_camera_y", "degrees":-90, "attachKeyFrame":true}
-
-            ---
-            ### 6. show_controls
-            **Purpose**: Shows an on-screen control hint icon (mouse button, scroll wheel) to tell the player what input action to perform on a block.
-            **When to use**: When teaching the player to interact with a block — e.g. "right-click this lever", "scroll on the wrench", "sneak + left-click".
-            **Fields**:
-            - point (float[3], required): position in the scene where the control indicator appears
-            - direction (string, required): which side of the point the icon appears. Values: "up", "down", "left", "right"
-            - action (string, required): input type. Values: "left" (left-click), "right" (right-click), "scroll" (scroll wheel)
-            - duration (int, optional, default 40): how long the indicator is shown
-            - item (string, optional): item id to display alongside the control (e.g. "minecraft:stick" shows the item icon)
-            - whileSneaking (bool, optional): if true, shows a "while sneaking" modifier
-            - whileCTRL (bool, optional): if true, shows a "while holding CTRL" modifier
-            **Example**: {"type":"show_controls", "point":[2.5,2.5,3.5], "direction":"down", "action":"right", "duration":40, "item":"minecraft:lever"}
-
-            ---
-            ### 7. play_sound
-            **Purpose**: Plays a sound effect during the scene. Adds audio feedback to important moments.
-            **When to use**: When a block activates (piston extending, door opening, explosion), to make the tutorial feel alive. Use sparingly.
-            **Fields**:
-            - sound (string, required): sound event id (e.g. "minecraft:block.piston.extend", "minecraft:block.lever.click", "minecraft:entity.experience_orb.pickup")
-            - soundVolume (float, optional, default 1.0): volume multiplier
-            - pitch (float, optional, default 1.0): pitch multiplier (>1 = higher, <1 = lower)
-            - source (string, optional, default "master"): sound category. Values: "master", "music", "record", "weather", "block", "hostile", "neutral", "player", "ambient", "voice"
-            **Example**: {"type":"play_sound", "sound":"minecraft:block.lever.click", "soundVolume":0.8, "pitch":1.2}
-
-            ---
-            ### 8. encapsulate_bounds
-            **Purpose**: Overrides the visible scene bounding box. By default the scene bounds match the structure size. Use this to shrink or expand the visible area.
-            **When to use**: Rarely needed. Useful when you want to focus on a sub-region of a large structure, or expand bounds to show entities that move outside the structure.
-            **Fields**:
-            - bounds (int[3], required): new scene dimensions [sizeX, sizeY, sizeZ]
-            **Example**: {"type":"encapsulate_bounds", "bounds":[5, 4, 5]}
-
-            ---
-            ### 9. set_block
+            ### 4. set_block
             **Purpose**: Places a block at a position (or fills a region) in the scene. The block appears instantly with optional particle effects.
             **When to use**: When demonstrating block placement, showing "before/after" states, or dynamically building up a structure during the tutorial.
             **IMPORTANT**: Check the structure's Y-layer layout in the description to identify the floor Y level. Always place new blocks at floor_Y + 1 or above — never overwrite floor/base blocks unintentionally.
@@ -569,7 +883,89 @@ public class AiSceneGenerator {
             **Example**: {"type":"set_block", "block":"minecraft:redstone_lamp", "blockPos":[2,1,3], "blockProperties":{"lit":"true"}, "spawnParticles":true}
 
             ---
-            ### 10. destroy_block
+            ### 5. show_controls
+            **Purpose**: Shows an on-screen control hint icon with an optional ingredient display. Has TWO use cases:
+            1. **Player interaction hint**: Show a mouse action (left-click, right-click, scroll) to teach the player how to interact with a block.
+            2. **Machine input/output indicator**: Show an item, fluid, or chemical at a machine's port to indicate what goes in/out. In this case, set the "item" field to the substance's registry ID and omit the "action" field.
+            **When to use**:
+            - Teaching player interaction: "right-click this lever", "scroll on the wrench" — you MUST set the "action" field ("left"/"right"/"scroll") AND the "item" field. NEVER omit action for player interaction hints.
+            - Showing machine I/O: "this port accepts Water", "this outputs Iron Ingots" — use show_controls with item field pointing at the port block, then follow with a text step labeling it as input/output. Omit "action" field for I/O indicators.
+            **Fields**:
+            - point (float[3], required): position in the scene where the indicator appears
+            - direction (string, required): which side of the point the icon appears. Values: "up", "down", "left", "right"
+            - action (string, optional): input type. Values: "left" (left-click), "right" (right-click), "scroll" (scroll wheel). Omit when using as I/O indicator.
+            - duration (int, optional, default 40): how long the indicator is shown
+            - item (string, optional): registry ID of any item, fluid, or substance to display. Supports ALL registry types: items (e.g. "minecraft:iron_ingot"), fluids (e.g. "minecraft:water"), modded chemicals (e.g. "mekanism:hydrogen"), etc.
+            - whileSneaking (bool, optional): if true, shows a "while sneaking" modifier
+            - whileCTRL (bool, optional): if true, shows a "while holding CTRL" modifier
+            **Example (player interaction)**: {"type":"show_controls", "point":[2.5,2.5,3.5], "direction":"down", "action":"right", "duration":40, "item":"minecraft:lever"}
+            **Example (machine I/O)**: {"type":"show_controls", "point":[3.5,1.5,0.5], "direction":"down", "duration":40, "item":"minecraft:water"}
+
+            ---
+            ### 6. create_item_entity
+            **Purpose**: Spawns a floating item entity (dropped item) in the scene. Can have initial velocity to simulate items being thrown or ejected.
+            **When to use**: When showing item drops, hopper transport, or illustrating crafting results. Use motion to make items fly out of machines.
+            **Fields**:
+            - item (string, required): item id (e.g. "minecraft:diamond", "minecraft:iron_ingot")
+            - pos (float[3], required): spawn position (can also use "point" field)
+            - motion (float[3], optional): initial velocity [vx, vy, vz]. In most cases use [0, 0, 0] to spawn the item stationary. Only use non-zero values when you need the item to visually fly/pop (e.g. [0, 0.15, 0] for gentle upward pop).
+            - count (int, optional, default 1): number of items to display in the stack
+            **Example**: {"type":"create_item_entity", "item":"minecraft:iron_ingot", "pos":[2.5, 2.0, 3.5], "motion":[0, 0, 0]}
+
+            ---
+            ### 7. clear_item_entities
+            **Purpose**: Removes item entities (dropped items) from the scene. Can clear all item entities or filter by item type, and can target the full scene or a specific region.
+            **When to use**: When cleaning up after demonstrating item drops, hopper mechanics, or machine output — to reset the scene before the next demonstration step. Also use when an item is visually consumed (picked up, inserted into a machine, smelted, crafted, or otherwise used up) to show it disappearing.
+            **Fields**:
+            - item (string, optional): item id to filter (e.g. "minecraft:diamond"). If omitted, clears ALL item entities.
+            - fullScene (bool, optional): if true, clears item entities in the entire scene. If false/omitted, uses blockPos/blockPos2 region.
+            - blockPos (int[3], optional): one corner of the region to clear (required if fullScene is not true)
+            - blockPos2 (int[3], optional): opposite corner of the region
+            **Example**: {"type":"clear_item_entities", "fullScene":true}
+            **Example (filtered)**: {"type":"clear_item_entities", "item":"minecraft:iron_ingot", "blockPos":[0,0,0], "blockPos2":[4,3,4]}
+
+            ---
+            ### 8. rotate_camera_y
+            **Purpose**: Smoothly rotates the camera around the Y (vertical) axis. Gives the player a different viewing angle of the structure.
+            **When to use**: When you want to show the build from a different side, or create a cinematic rotation effect. Use after showing an initial view and before explaining something on the other side.
+            **Fields**:
+            - degrees (float, optional, default 90): rotation angle in degrees. Positive = clockwise when viewed from above. Use 90 for quarter turn, 180 for half turn.
+            **Example**: {"type":"rotate_camera_y", "degrees":-90, "attachKeyFrame":true}
+
+            ---
+            ### 9. play_sound
+            **Purpose**: Plays a sound effect during the scene. Adds audio feedback to important moments.
+            **When to use**: When a block activates (piston extending, door opening, explosion), to make the tutorial feel alive. Use sparingly.
+            **Fields**:
+            - sound (string, required): sound event id (e.g. "minecraft:block.piston.extend", "minecraft:block.lever.click", "minecraft:entity.experience_orb.pickup")
+            - soundVolume (float, optional, default 1.0): volume multiplier
+            - pitch (float, optional, default 1.0): pitch multiplier (>1 = higher, <1 = lower)
+            - source (string, optional, default "master"): sound category. Values: "master", "music", "record", "weather", "block", "hostile", "neutral", "player", "ambient", "voice"
+            **Example**: {"type":"play_sound", "sound":"minecraft:block.lever.click", "soundVolume":0.8, "pitch":1.2}
+
+            ---
+            ### 10. hide_section
+            **Purpose**: Hides a rectangular section of blocks with a slide-out animation. The blocks visually slide away in the specified direction and disappear.
+            **When to use**: When you want to remove part of the structure to reveal what's behind/underneath, or to clear the view before showing a new configuration.
+            **Fields**:
+            - blockPos (int[3], required): one corner of the section to hide
+            - blockPos2 (int[3], required): opposite corner
+            - direction (string, required): slide-out direction. Values: "up", "down", "north", "south", "east", "west"
+            **Example**: {"type":"hide_section", "blockPos":[0,2,0], "blockPos2":[4,3,4], "direction":"up"}
+
+            ---
+            ### 11. show_section_and_merge
+            **Purpose**: Shows a rectangular section of blocks with a slide-in animation from the given direction, then merges it into the main scene. Used to dramatically reveal parts of a build.
+            **When to use**: When building up a structure piece by piece, or revealing a hidden mechanism. The linkId lets you track this section for later move_section/rotate_section operations.
+            **Fields**:
+            - blockPos (int[3], required): one corner of the section
+            - blockPos2 (int[3], required): opposite corner
+            - direction (string, required): direction the section slides IN from. Values: "up", "down", "north", "south", "east", "west"
+            - linkId (string, optional, default "default"): identifier for this section. Use unique ids if you want to animate sections independently later.
+            **Example**: {"type":"show_section_and_merge", "blockPos":[0,1,0], "blockPos2":[4,1,4], "direction":"down", "linkId":"floor"}
+
+            ---
+            ### 12. destroy_block
             **Purpose**: Removes a block from the scene, optionally showing destruction particles. The block position becomes air.
             **When to use**: When showing what happens when a block is broken, or when clearing blocks for the next step of a tutorial.
             **Fields**:
@@ -578,7 +974,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"destroy_block", "blockPos":[2,1,3], "destroyParticles":true}
 
             ---
-            ### 11. replace_blocks
+            ### 13. replace_blocks
             **Purpose**: Replaces all blocks in a region with a new block type. Similar to set_block with a range, but semantically represents "replacing existing blocks".
             **When to use**: When swapping materials in a region, or showing an upgrade/transformation (e.g. replacing cobblestone with stone bricks).
             **Fields**:
@@ -590,27 +986,6 @@ public class AiSceneGenerator {
             **Example**: {"type":"replace_blocks", "block":"minecraft:stone_bricks", "blockPos":[0,0,0], "blockPos2":[4,0,4], "spawnParticles":true}
 
             ---
-            ### 12. hide_section
-            **Purpose**: Hides a rectangular section of blocks with a slide-out animation. The blocks visually slide away in the specified direction and disappear.
-            **When to use**: When you want to remove part of the structure to reveal what's behind/underneath, or to clear the view before showing a new configuration.
-            **Fields**:
-            - blockPos (int[3], required): one corner of the section to hide
-            - blockPos2 (int[3], required): opposite corner
-            - direction (string, required): slide-out direction. Values: "up", "down", "north", "south", "east", "west"
-            **Example**: {"type":"hide_section", "blockPos":[0,2,0], "blockPos2":[4,3,4], "direction":"up"}
-
-            ---
-            ### 13. show_section_and_merge
-            **Purpose**: Shows a rectangular section of blocks with a slide-in animation from the given direction, then merges it into the main scene. Used to dramatically reveal parts of a build.
-            **When to use**: When building up a structure piece by piece, or revealing a hidden mechanism. The linkId lets you track this section for later move_section/rotate_section operations.
-            **Fields**:
-            - blockPos (int[3], required): one corner of the section
-            - blockPos2 (int[3], required): opposite corner
-            - direction (string, required): direction the section slides IN from. Values: "up", "down", "north", "south", "east", "west"
-            - linkId (string, optional, default "default"): identifier for this section. Use unique ids if you want to animate sections independently later.
-            **Example**: {"type":"show_section_and_merge", "blockPos":[0,1,0], "blockPos2":[4,1,4], "direction":"down", "linkId":"floor"}
-
-            ---
             ### 14. toggle_redstone_power
             **Purpose**: Toggles redstone power state for blocks in a region. Activates or deactivates redstone-powered blocks (levers, repeaters, lamps, pistons, etc.).
             **When to use**: When demonstrating redstone circuits — flipping a lever, showing a piston extending, lighting a redstone lamp. This simulates the player interacting with redstone.
@@ -620,7 +995,37 @@ public class AiSceneGenerator {
             **Example**: {"type":"toggle_redstone_power", "blockPos":[2,1,3]}
 
             ---
-            ### 15. modify_block_entity_nbt
+            ### 15. indicate_success
+            **Purpose**: Shows a pulsing green checkmark/success particle indicator at a block position. Visual cue for "this is correct" or "this is complete".
+            **When to use**: Sparingly. Use only at true conclusion points (end of tutorial, final configuration achieved, or major milestone reached). Avoid spamming it at every small action — overuse dilutes its impact. Use 1-2 times per scene segment, not once per step.
+            **Fields**:
+            - blockPos (int[3], required): position to show the indicator
+            **Example**: {"type":"indicate_success", "blockPos":[2,1,3]}
+
+            ---
+            ### 16. indicate_redstone
+            **Purpose**: Shows a pulsing red particle indicator at a block position. Visual cue to draw attention to a redstone-related block.
+            **When to use**: When you want to highlight that a specific block is receiving or emitting redstone power, without changing any block state.
+            **Fields**:
+            - blockPos (int[3], required): position to show the indicator
+            **Example**: {"type":"indicate_redstone", "blockPos":[2,1,3]}
+
+            ---
+            ## Less Common Step Types
+            The following step types are rarely needed. Use them only when the specific situation calls for it.
+
+            ---
+            ### 17. shared_text
+            Like text, but references a pre-defined lang key. Rarely used — prefer inline text.
+            **Fields**: key (string), point (float[3]), duration (int), color (string), placeNearTarget (bool)
+
+            ---
+            ### 18. encapsulate_bounds
+            Overrides the visible scene bounding box. Rarely used.
+            **Fields**: bounds (int[3]) — new scene dimensions [sizeX, sizeY, sizeZ]
+
+            ---
+            ### 19. modify_block_entity_nbt
             **Purpose**: Directly modifies the NBT data of a block entity (chest, sign, command block, etc.). Allows changing container contents, sign text, and other tile entity data.
             **When to use**: When you need to show specific block entity states that can't be achieved through normal block placement — e.g. items inside a chest, text on a sign.
             **Fields**:
@@ -631,7 +1036,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"modify_block_entity_nbt", "blockPos":[2,1,3], "nbt":"{Items:[{id:\\"minecraft:diamond\\",Count:1b,Slot:0b}]}", "reDrawBlocks":true}
 
             ---
-            ### 16. create_entity
+            ### 20. create_entity
             **Purpose**: Spawns a living entity (mob) into the scene. The entity has AI and gravity disabled by default, so it stays in place as a visual prop.
             **When to use**: When the tutorial involves mobs — e.g. showing a mob farm, demonstrating a trap, or illustrating mob behavior.
             **Fields**:
@@ -643,44 +1048,19 @@ public class AiSceneGenerator {
             **Example**: {"type":"create_entity", "entity":"minecraft:villager", "pos":[2.5, 1.0, 3.5], "yaw":180}
 
             ---
-            ### 17. create_item_entity
-            **Purpose**: Spawns a floating item entity (dropped item) in the scene. Can have initial velocity to simulate items being thrown or ejected.
-            **When to use**: When showing item drops, hopper transport, or illustrating crafting results. Use motion to make items fly out of machines.
+            ### 21. clear_entities
+            **Purpose**: Removes living entities (mobs) from the scene. Can clear all entities or filter by entity type, and can target the full scene or a specific region. Does NOT affect item entities.
             **Fields**:
-            - item (string, required): item id (e.g. "minecraft:diamond", "minecraft:iron_ingot")
-            - pos (float[3], required): spawn position (can also use "point" field)
-            - motion (float[3], optional): initial velocity [vx, vy, vz]. Use small values like [0, 0.2, 0] for gentle upward pop.
-            - count (int, optional, default 1): number of items to display in the stack
-            **Example**: {"type":"create_item_entity", "item":"minecraft:iron_ingot", "pos":[2.5, 2.0, 3.5], "motion":[0, 0.15, 0]}
-
-            ---
-            ### 18. clear_entities
-            **Purpose**: Removes living entities (mobs) from the scene. Can clear all entities or filter by entity type, and can target the full scene or a specific region.
-            **When to use**: When resetting a scene after demonstrating mob interactions (e.g. clearing zombies after showing a trap), or before spawning a new set of entities. Does NOT affect item entities (dropped items).
-            **Fields**:
-            - entity (string, optional): entity type id to filter (e.g. "minecraft:zombie"). If omitted, clears ALL non-item entities.
+            - entity (string, optional): entity type id to filter. If omitted, clears ALL non-item entities.
             - fullScene (bool, optional): if true, clears entities in the entire scene. If false/omitted, uses blockPos/blockPos2 region.
             - blockPos (int[3], optional): one corner of the region to clear (required if fullScene is not true)
             - blockPos2 (int[3], optional): opposite corner of the region
             **Example**: {"type":"clear_entities", "fullScene":true}
-            **Example (filtered)**: {"type":"clear_entities", "entity":"minecraft:zombie", "blockPos":[0,0,0], "blockPos2":[4,3,4]}
 
             ---
-            ### 19. clear_item_entities
-            **Purpose**: Removes item entities (dropped items) from the scene. Can clear all item entities or filter by item type, and can target the full scene or a specific region.
-            **When to use**: When cleaning up after demonstrating item drops, hopper mechanics, or machine output — to reset the scene before the next demonstration step.
-            **Fields**:
-            - item (string, optional): item id to filter (e.g. "minecraft:diamond"). If omitted, clears ALL item entities.
-            - fullScene (bool, optional): if true, clears item entities in the entire scene. If false/omitted, uses blockPos/blockPos2 region.
-            - blockPos (int[3], optional): one corner of the region to clear (required if fullScene is not true)
-            - blockPos2 (int[3], optional): opposite corner of the region
-            **Example**: {"type":"clear_item_entities", "fullScene":true}
-            **Example (filtered)**: {"type":"clear_item_entities", "item":"minecraft:iron_ingot", "blockPos":[0,0,0], "blockPos2":[4,3,4]}
-
-            ---
-            ### 20. rotate_section
+            ### 22. rotate_section
             **Purpose**: Smoothly rotates a section of blocks around its center over a duration. Creates a spinning/tilting animation effect.
-            **When to use**: When demonstrating mechanical rotation, or for dramatic visual effect. The section must have been previously created with show_section_and_merge with a matching linkId.
+            **When to use**: When demonstrating mechanical rotation. The section must have been previously created with show_section_and_merge with a matching linkId.
             **Fields**:
             - linkId (string, required): the section to rotate (must match a previous show_section_and_merge linkId)
             - duration (int, optional, default 20): animation duration in ticks
@@ -691,7 +1071,7 @@ public class AiSceneGenerator {
             **Example**: {"type":"rotate_section", "linkId":"gear", "duration":40, "rotY":90}
 
             ---
-            ### 21. move_section
+            ### 23. move_section
             **Purpose**: Smoothly translates a section of blocks by an offset over a duration. Creates a sliding animation.
             **When to use**: When showing pistons pushing blocks, doors opening, or any translational movement of a group of blocks.
             **Fields**:
@@ -700,75 +1080,53 @@ public class AiSceneGenerator {
             - offset (float[3], required): movement offset [dx, dy, dz] in blocks
             **Example**: {"type":"move_section", "linkId":"piston_head", "duration":10, "offset":[1.0, 0, 0]}
 
-            ---
-            ### 22. indicate_redstone
-            **Purpose**: Shows a pulsing red particle indicator at a block position. Visual cue to draw attention to a redstone-related block.
-            **When to use**: When you want to highlight that a specific block is receiving or emitting redstone power, without changing any block state.
-            **Fields**:
-            - blockPos (int[3], required): position to show the indicator
-            **Example**: {"type":"indicate_redstone", "blockPos":[2,1,3]}
-
-            ---
-            ### 23. indicate_success
-            **Purpose**: Shows a pulsing green checkmark/success particle indicator at a block position. Visual cue for "this is correct" or "this is complete".
-            **When to use**: Sparingly. Use only at true conclusion points (end of tutorial, final configuration achieved, or major milestone reached). Avoid spamming it at every small action — overuse dilutes its impact. Use 1-2 times per scene segment, not once per step.
-            **Fields**:
-            - blockPos (int[3], required): position to show the indicator
-            **Example**: {"type":"indicate_success", "blockPos":[2,1,3]}
-
             ## Coordinate System
             - X: east(+)/west(-), Y: up(+)/down(-), Z: south(+)/north(-)
             - [0,0,0] is the bottom-north-west corner of the structure
-            - For "point" fields (text, show_controls, entity pos): use float values. Use x.5 to target block centers (e.g. [2.5, 1.5, 3.5] = center of block [2,1,3])
+            - For "point" fields (text, show_controls, entity pos): use float values. Use x.5 to target block centers (e.g. [2.5, 1.5, 3.5] = center of block [2,1,3]). Use integer x/z values to target block faces (e.g. [1.0, 2.5, 2.0] = west face of block [1,2,2]).
             - For "blockPos" fields (set_block, destroy_block, etc.): use integer values [x, y, z]
             - All coordinates must be within the structure bounds
 
-            ## CRITICAL: Show, Don't Tell
-            Ponder scenes are VISUAL DEMONSTRATIONS, not text lectures.
-            The player watches a 3D scene — they want to SEE things happen, not just read descriptions.
-
-            **Rules for visual storytelling:**
-            - When mentioning a block/item, SHOW it: use set_block to place it, or create_item_entity to spawn it. Use indicate_redstone for power flows; save indicate_success for major conclusions only.
-            - When explaining a crafting recipe or result, use create_item_entity to spawn the items visually
-            - When explaining player interaction, use show_controls to display the mouse action (left-click, right-click, scroll)
-            - When explaining redstone mechanics, use toggle_redstone_power to actually toggle levers/lamps/pistons so the player sees the state change
-            - When explaining a building process, use set_block step-by-step to place blocks one at a time or layer by layer, rather than describing it in text
-            - Text steps should ANNOTATE what the player is seeing, not replace visual demonstration. Keep text SHORT (one sentence).
-            - A good ratio: for every 1 text step, have at least 1-2 visual action steps (set_block, toggle_redstone_power, create_item_entity, show_controls, etc.)
-
-            **Bad example** (text-only, avoid this):
-            1. show_structure → 2. text "Place a lever on the block" → 3. idle → 4. text "The lever powers the lamp" → 5. idle → 6. text "The lamp turns on"
-
-            **Good example** (visual-first demonstration):
-            1. show_structure → 2. set_block lever → 3. idle → 4. text "Place a lever here" → 5. idle → 6. show_controls right-click → 7. toggle_redstone_power lever → 8. idle → 9. text "The lamp turns on!" → 10. indicate_success lamp_pos
+            ## Camera Awareness
+            The default camera looks from the NORTHWEST corner toward the SOUTHEAST.
+            - **Visible faces**: north face (Z=0) and west face (low X / X=0)
+            - **Hidden faces**: south face (high Z) and east face (high X)
+            - Text "point" coordinates should target blocks on the VISIBLE side (low Z or low X). If the outline says to annotate something on the hidden side, insert a rotate_camera_y step BEFORE the text step.
+            - rotate_camera_y: positive degrees = clockwise from above. +90° reveals the east face, -90° reveals the south face, +180° shows the back (southeast).
+            - After rotating, remember subsequent text/actions are from the new angle. Rotate back when switching to a different topic if needed.
+            - **Prefer annotations on the north (Z=0) face** — this is the primary visible face.
 
             ## Scene Design Guidelines
-            1. ALWAYS start each scene segment with show_structure — nothing is visible without it
-            2. Use idle steps between content steps (20-40 ticks for reading text, 5-10 ticks between quick block operations)
-            3. Set placeNearTarget: true on text steps so labels float near the relevant blocks
-            4. Use attachKeyFrame: true on important steps — these become clickable markers on the timeline
+            Follow the outline provided — it already contains the scene design plan.
+            Your job is to translate the outline into valid JSON, not to redesign the scene.
+            Additional formatting rules:
+            1. ALWAYS start each scene segment with show_structure
+            2. **Duration guidelines**: Default idle is 60 ticks. Default text/show_controls duration is 50 ticks. Use shorter idles (10-20 ticks) only for rapid consecutive small operations (e.g. between a visual action and its text annotation, or after rotate_camera_y).
+            3. Set placeNearTarget: true on text steps
+            4. Use attachKeyFrame: true on important steps
             5. Provide both en_us and zh_cn text in all text steps
-            6. Scene segmentation: only create a new segment for major topic shifts or scene resets. Keep continuous flow within one segment. Typical: 1-3 segments with 8-20+ steps each. Avoid many short segments.
+            6. The "steps" array at the top level MUST be empty []; put all steps inside "scenes" segments
             7. Color conventions: "green" = general info, "red" = warning/important, "blue" = highlight, "input" = player action required
-            8. Visual-first ordering: when introducing a block or item, FIRST show it visually (set_block / create_item_entity), THEN add the text annotation. Pattern: visual action → idle (10-20 ticks) → text → idle (≥ text duration). The player should SEE the thing before reading about it.
-            9. Typical scene flow: show_structure → visual action (set_block/create_item_entity) → idle → text (brief annotation) → idle → more visual actions → ... → (only at the very end) indicate_success
-            9. Use rotate_camera_y when the interesting part is on a different side of the structure
-            10. When the tutorial involves multiple blocks, place them one at a time with short idles between each, so the player can follow along
-            11. Use destroy_block + set_block pairs to show "replace this block with that block" visually
-            12. Use create_item_entity to show items that a machine produces, a mob drops, or a player needs to use
-            13. Floor awareness: read the structure description's Y-layer layout to find the floor Y. Always place new blocks at floor_Y + 1 or higher — never accidentally overwrite the floor or base layer with set_block.
-            14. Text overlap prevention: each text label persists for its "duration" ticks. Before starting a new text step, ensure the previous text has had time to expire. Either add idle ≥ previous text's duration, or point the new text at a position with ≥ 2-block Y difference from the previous one so labels don't visually collide.
-            15. Default structure adaptation: when using ponderer:basic (no user-provided NBT), the scene starts as a plain stone platform. Use set_block or replace_blocks early in the scene to adapt the floor and surroundings to match the tutorial's theme (e.g. replace the floor with dirt/farmland for farming, with sand for desert, or add context walls/props to make the demonstration feel natural).
+            8. **Item entity lifecycle**: When demonstrating multiple items in sequence, ALWAYS use clear_item_entities before spawning the next. Pattern: create_item_entity → idle → show_controls/text → idle → clear_item_entities → (next create_item_entity or continue). Always clean up with clear_item_entities after the last item demo too.
+            9. **show_controls explanation pattern**: After a show_controls step, always follow with idle → text explaining what the control hint means. Never leave show_controls without a follow-up text annotation.
+
+            ## Localization Quality Rules
+            When writing zh_cn (Chinese) text in text steps:
+            - Write NATURAL, fluent Chinese directly. Do NOT translate from English — avoid "翻译腔" (translation-ese).
+            - **Preserve proper nouns exactly**: Use the ORIGINAL Chinese display names from the game for blocks, items, fluids, chemicals, etc. (e.g. "活塞" not "推动装置").
+            - If the user prompt or outline contains Chinese names, copy them verbatim into your zh_cn text.
+            - Keep text concise and game-appropriate, matching the tone of Minecraft in-game tutorials.
 
             ## Important Rules
-            - Output ONLY valid JSON. No markdown fences, no comments, no trailing commas, no explanation text
+            - Output ONLY valid JSON. Do NOT wrap it in markdown code fences (no ```json```). No comments, no trailing commas, no explanation text before or after the JSON.
             - The JSON must be a single, complete DslScene object
-            - **CRITICAL — Block/Item ID resolution**: The "block" field in set_block/replace_blocks and all item/entity IDs MUST use the EXACT registry ID from the "Display Name → Registry ID mapping" provided above. Do NOT use any other ID, even if the outline suggests one.
+            - **CRITICAL — ID resolution**: The "block" field in set_block/replace_blocks, the "item" field in show_controls/create_item_entity, and all entity IDs MUST use the EXACT registry ID from the "Display Name → Registry ID mapping" provided above. This mapping covers blocks, items, fluids, chemicals, entities, and all other registered types. Do NOT use any other ID, even if the outline suggests one.
               - If the mapping says `endoflame → botania:endoflame`, use `"block": "botania:endoflame"` directly.
               - NEVER use a generic parent block + blockProperties/variant to select a sub-type (e.g. do NOT use `"block": "botania:specialflower"` with `"blockProperties": {"type": "endoflame"}`).
               - The mapping is authoritative — it overrides your training knowledge and any suggestions from the outline.
-            - The "steps" array at the top level MUST be empty []; put all steps inside "scenes" segments
             - Screenshots from reference URLs are for understanding the workflow only; use the NBT structure data for accurate block positions
+
+            {{EXAMPLE}}
             """;
     }
 }

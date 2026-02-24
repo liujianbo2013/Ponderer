@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import com.nododiiiii.ponderer.Config;
+
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -25,7 +27,7 @@ public class OpenAiCompatProvider implements LlmProvider {
                                                String baseUrl, String apiKey, String model) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
-        body.addProperty("max_tokens", 8192);
+        body.addProperty("max_tokens", Config.AI_MAX_TOKENS.get());
 
         JsonArray messages = new JsonArray();
 

@@ -575,7 +575,7 @@ public abstract class AbstractStepEditorScreen extends AbstractSimiScreen implem
         errorMessage = switch (mode) {
             case BLOCK -> UIText.of("ponderer.ui.jei.error.not_block");
             case ENTITY -> UIText.of("ponderer.ui.jei.error.not_spawn_egg");
-            case ITEM -> null;
+            case ITEM, INGREDIENT -> null;
         };
     }
 

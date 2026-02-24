@@ -47,6 +47,7 @@ public class DslScene {
         public Float yaw;
         public Float pitch;
         public Float degrees;
+        public Float scale;
         public Integer count;
         public List<Integer> bounds;
         public String direction;

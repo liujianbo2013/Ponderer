@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,29 +19,38 @@ import java.util.regex.Pattern;
  */
 public class WebPageFetcher {
 
-    private static final HttpClient CLIENT = HttpClient.newBuilder()
+    private static final int MAX_IMAGES = 5;
+    private static final int MAX_TEXT_LENGTH = 30000;
+    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    /** Plain HttpClient without proxy, used when web proxy is disabled. */
+    private static final HttpClient PLAIN_CLIENT = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
-
-    private static final int MAX_IMAGES = 5;
-    private static final int MAX_TEXT_LENGTH = 30000;
 
     /** Result of fetching a web page. */
     public record WebPageContent(String text, List<ImageData> images) {}
     public record ImageData(String base64, String mediaType) {}
 
+    private static HttpClient getClient() {
+        return com.nododiiiii.ponderer.Config.AI_WEB_USE_PROXY.get()
+            ? HttpClientFactory.get() : PLAIN_CLIENT;
+    }
+
     /**
      * Fetch a URL and extract text + images.
      */
     public static WebPageContent fetch(String url) throws IOException, InterruptedException {
+        HttpClient client = getClient();
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(Duration.ofSeconds(15))
+            .header("User-Agent", USER_AGENT)
             .GET()
             .build();
 
-        HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode() + " fetching " + url);
         }
@@ -50,7 +61,7 @@ public class WebPageFetcher {
             text = text.substring(0, MAX_TEXT_LENGTH) + "\n... (truncated)";
         }
 
-        List<ImageData> images = extractAndDownloadImages(html, url);
+        List<ImageData> images = extractAndDownloadImages(html, url, client);
         return new WebPageContent(text, images);
     }
 
@@ -80,10 +91,9 @@ public class WebPageFetcher {
     }
 
     /**
-     * Extract image URLs from HTML, filter by likely content images, download and encode.
+     * Extract image URLs from HTML, filter by likely content images, download in parallel and encode.
      */
-    private static List<ImageData> extractAndDownloadImages(String html, String pageUrl) {
-        List<ImageData> images = new ArrayList<>();
+    private static List<ImageData> extractAndDownloadImages(String html, String pageUrl, HttpClient client) {
         Pattern imgPattern = Pattern.compile("<img[^>]+src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
         Matcher matcher = imgPattern.matcher(html);
 
@@ -110,32 +120,39 @@ public class WebPageFetcher {
             candidateUrls.add(src);
         }
 
+        // Download images in parallel
+        List<CompletableFuture<ImageData>> futures = new ArrayList<>();
         for (String imgUrl : candidateUrls) {
+            if (futures.size() >= MAX_IMAGES * 2) break; // fetch extra candidates in case some fail
+            HttpRequest imgReq = HttpRequest.newBuilder()
+                .uri(URI.create(imgUrl))
+                .timeout(Duration.ofSeconds(10))
+                .header("User-Agent", USER_AGENT)
+                .GET()
+                .build();
+            futures.add(
+                client.sendAsync(imgReq, HttpResponse.BodyHandlers.ofByteArray())
+                    .thenApply(imgResp -> {
+                        if (imgResp.statusCode() != 200) return null;
+                        byte[] data = imgResp.body();
+                        if (data.length < 5000 || data.length > 5_000_000) return null;
+                        String contentType = imgResp.headers().firstValue("content-type").orElse("image/png");
+                        if (!contentType.startsWith("image/")) return null;
+                        if (contentType.contains(";")) contentType = contentType.substring(0, contentType.indexOf(';')).trim();
+                        return new ImageData(Base64.getEncoder().encodeToString(data), contentType);
+                    })
+                    .exceptionally(ex -> null)
+            );
+        }
+
+        // Collect results, keeping order, up to MAX_IMAGES
+        List<ImageData> images = new ArrayList<>();
+        for (CompletableFuture<ImageData> f : futures) {
             if (images.size() >= MAX_IMAGES) break;
             try {
-                HttpRequest imgReq = HttpRequest.newBuilder()
-                    .uri(URI.create(imgUrl))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-                HttpResponse<byte[]> imgResp = CLIENT.send(imgReq, HttpResponse.BodyHandlers.ofByteArray());
-                if (imgResp.statusCode() != 200) continue;
-
-                byte[] data = imgResp.body();
-                // Skip images smaller than 5KB (likely icons)
-                if (data.length < 5000) continue;
-                // Skip images larger than 5MB
-                if (data.length > 5_000_000) continue;
-
-                String contentType = imgResp.headers().firstValue("content-type").orElse("image/png");
-                if (!contentType.startsWith("image/")) continue;
-                // Normalize content type
-                if (contentType.contains(";")) contentType = contentType.substring(0, contentType.indexOf(';')).trim();
-
-                images.add(new ImageData(Base64.getEncoder().encodeToString(data), contentType));
-            } catch (Exception ignored) {
-                // Skip failed image downloads
-            }
+                ImageData img = f.join();
+                if (img != null) images.add(img);
+            } catch (Exception ignored) {}
         }
         return images;
     }

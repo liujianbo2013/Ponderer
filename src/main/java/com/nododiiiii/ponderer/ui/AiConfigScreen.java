@@ -30,6 +30,7 @@ public class AiConfigScreen extends AbstractSimiScreen {
     private HintableTextFieldWidget proxyField;
     private HintableTextFieldWidget maxTokensField;
     private boolean trustAllSsl;
+    private boolean webUseProxy;
     private boolean initialized = false;
 
     private record ClickableButton(int x, int y, int w, int h, String label, Runnable action) {}
@@ -40,7 +41,7 @@ public class AiConfigScreen extends AbstractSimiScreen {
     }
 
     private int getWindowHeight() {
-        return 36 + 7 * ROW_H + 40;
+        return 36 + 8 * ROW_H + 40;
     }
 
     @Override
@@ -62,6 +63,7 @@ public class AiConfigScreen extends AbstractSimiScreen {
             curProxy = Config.AI_PROXY.get();
             curMaxTokens = String.valueOf(Config.AI_MAX_TOKENS.get());
             trustAllSsl = Config.AI_TRUST_ALL_SSL.get();
+            webUseProxy = Config.AI_WEB_USE_PROXY.get();
             initialized = true;
         }
 
@@ -126,6 +128,12 @@ public class AiConfigScreen extends AbstractSimiScreen {
         clickableButtons.add(new ClickableButton(fieldX, y + 1, fieldW, 16,
             UIText.of("ponderer.ui.ai_config.trust_ssl") + ": " + (trustAllSsl ? "ON" : "OFF"),
             this::toggleTrustSsl));
+        y += ROW_H;
+
+        // Web Use Proxy (toggle button)
+        clickableButtons.add(new ClickableButton(fieldX, y + 1, fieldW, 16,
+            UIText.of("ponderer.ui.ai_config.web_use_proxy") + ": " + (webUseProxy ? "ON" : "OFF"),
+            this::toggleWebUseProxy));
 
         // Save & Back buttons
         int btnY = guiTop + getWindowHeight() - 32;
@@ -158,11 +166,17 @@ public class AiConfigScreen extends AbstractSimiScreen {
         }
 
         Config.AI_TRUST_ALL_SSL.set(trustAllSsl);
+        Config.AI_WEB_USE_PROXY.set(webUseProxy);
         goBack();
     }
 
     private void toggleTrustSsl() {
         trustAllSsl = !trustAllSsl;
+        init(minecraft, width, height);
+    }
+
+    private void toggleWebUseProxy() {
+        webUseProxy = !webUseProxy;
         init(minecraft, width, height);
     }
 
@@ -199,6 +213,8 @@ public class AiConfigScreen extends AbstractSimiScreen {
         graphics.drawString(font, UIText.of("ponderer.ui.ai_config.max_tokens"), lx, y + 5, 0xCCCCCC);
         y += ROW_H;
         graphics.drawString(font, UIText.of("ponderer.ui.ai_config.trust_ssl"), lx, y + 5, 0xCCCCCC);
+        y += ROW_H;
+        graphics.drawString(font, UIText.of("ponderer.ui.ai_config.web_use_proxy"), lx, y + 5, 0xCCCCCC);
 
         // Buttons
         for (ClickableButton btn : clickableButtons) {
@@ -233,7 +249,12 @@ public class AiConfigScreen extends AbstractSimiScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE)
+            return super.keyPressed(keyCode, scanCode, modifiers);
         if (getFocused() != null && getFocused().keyPressed(keyCode, scanCode, modifiers))
+            return true;
+        // Block all other keys when a text field is focused to prevent game keybinds from firing
+        if (getFocused() instanceof net.minecraft.client.gui.components.EditBox)
             return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
     }

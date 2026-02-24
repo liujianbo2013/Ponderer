@@ -82,8 +82,9 @@ public final class JeiCompat {
 
     /**
      * Get all JEI ingredient entries for registry mapping.
-     * Returns a list of {id, displayName, path} string arrays for ALL ingredients
+     * Returns a list of {id, displayName, path, kind} string arrays for ALL ingredients
      * from ALL JEI-registered types (items, fluids, Mekanism chemicals, etc.).
+     * The "kind" field indicates the ingredient type (e.g. "item", "fluid", "chemical").
      */
     public static List<String[]> getAllExtraIngredientEntries() {
         if (!isAvailable()) return List.of();

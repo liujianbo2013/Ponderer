@@ -8,6 +8,7 @@ import com.nododiiiii.ponderer.ponder.DslScene;
 import com.nododiiiii.ponderer.ponder.LocalizedText;
 import com.nododiiiii.ponderer.ponder.PondererClientCommands;
 import com.nododiiiii.ponderer.ponder.SceneStore;
+import com.nododiiiii.ponderer.ui.UIText;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.slf4j.Logger;
@@ -113,6 +114,9 @@ public class AiSceneGenerator {
                 // 3. Fetch web pages (if any)
                 List<LlmProvider.ContentBlock> webContent = new ArrayList<>();
                 StringBuilder webLogBuf = new StringBuilder();
+                if (referenceUrls.stream().anyMatch(u -> u != null && !u.isBlank())) {
+                    notifyStatus(onStatus, UIText.of("ponderer.ui.ai_generate.status.fetching_web"));
+                }
                 for (String url : referenceUrls) {
                     if (url == null || url.isBlank()) continue;
                     try {
@@ -155,7 +159,7 @@ public class AiSceneGenerator {
                 String structuresStr = String.join(", ", structureNames);
 
                 // ---- PASS 1: Generate scene outline ----
-                notifyStatus(onStatus, "Generating outline (1/2)...");
+                notifyStatus(onStatus, UIText.of("ponderer.ui.ai_generate.status.outline"));
 
                 List<LlmProvider.ContentBlock> outlineContent = new ArrayList<>();
                 outlineContent.add(new LlmProvider.ContentBlock.Text(structDesc));
@@ -181,7 +185,7 @@ public class AiSceneGenerator {
                 writeLog("last_registry_mapping.log", registryMapping);
 
                 // ---- PASS 2: Generate JSON (with retry on parse failure) ----
-                notifyStatus(onStatus, "Generating JSON (2/2)...");
+                notifyStatus(onStatus, UIText.of("ponderer.ui.ai_generate.status.json"));
 
                 DslScene scene = null;
                 String json = null;
@@ -190,7 +194,7 @@ public class AiSceneGenerator {
                 while (parseAttempt < 2 && scene == null) {
                     parseAttempt++;
                     if (parseAttempt == 2) {
-                        notifyStatus(onStatus, "JSON parse failed, retrying (attempt 2/2)...");
+                        notifyStatus(onStatus, UIText.of("ponderer.ui.ai_generate.status.retry"));
                     }
 
                     List<LlmProvider.ContentBlock> jsonContent = new ArrayList<>();
@@ -256,6 +260,9 @@ public class AiSceneGenerator {
                     throw new RuntimeException("Failed to generate valid scene after 2 attempts");
                 }
 
+                // 9a. Post-process: auto-add attachKeyFrame to all non-text/idle steps
+                autoAddKeyFrames(scene);
+
                 // 9. Pretty-print and save
                 String prettyJson = GSON_PRETTY.toJson(scene);
                 Path sceneDir = SceneStore.getSceneDir();
@@ -311,10 +318,11 @@ public class AiSceneGenerator {
      * Returns an empty list if the line is absent.
      */
     private static List<String> parseRequiredElements(String outline) {
-        for (String line : outline.split("\n")) {
+        String[] lines = outline.split("\n");
+        for (int i = 0; i < lines.length; i++) {
             // Strip markdown bold/italic markers and leading/trailing whitespace
             // NOTE: do NOT strip underscores — they appear in "REQUIRED_ELEMENTS" and registry IDs
-            String cleaned = line.trim().replaceAll("[*`#>]", "").trim();
+            String cleaned = lines[i].trim().replaceAll("[*`#>]", "").trim();
             // Normalize to uppercase, collapse spaces, strip possible dash prefix ("- REQUIRED_ELEMENTS:")
             String upper = cleaned.toUpperCase(Locale.ROOT).replaceAll("^[-\\s]+", "");
             // Match "REQUIRED_ELEMENTS" or "REQUIRED ELEMENTS" with optional underscore/space,
@@ -332,6 +340,17 @@ public class AiSceneGenerator {
                     idx--; // will be incremented below
                 }
                 String rest = cleaned.substring(idx + 1).trim();
+                // If the elements are on the next line(s), read ahead
+                if (rest.isEmpty()) {
+                    StringBuilder buf = new StringBuilder();
+                    for (int j = i + 1; j < lines.length; j++) {
+                        String nextLine = lines[j].trim();
+                        if (nextLine.isEmpty()) break; // stop at blank line
+                        if (buf.length() > 0) buf.append(", ");
+                        buf.append(nextLine);
+                    }
+                    rest = buf.toString().trim();
+                }
                 if (rest.isEmpty()) return List.of();
                 List<String> result = new ArrayList<>();
                 for (String part : rest.split("[,;、]")) {
@@ -342,6 +361,35 @@ public class AiSceneGenerator {
             }
         }
         return List.of();
+    }
+
+    /**
+     * Post-process: auto-add attachKeyFrame to the first non-text/idle step
+     * in each consecutive run. Resets when a text or idle step is encountered.
+     */
+    private static void autoAddKeyFrames(DslScene scene) {
+        if (scene.steps != null) addKeyFramesToSteps(scene.steps);
+        if (scene.scenes != null) {
+            for (DslScene.SceneSegment seg : scene.scenes) {
+                if (seg.steps != null) addKeyFramesToSteps(seg.steps);
+            }
+        }
+    }
+
+    private static void addKeyFramesToSteps(List<DslScene.DslStep> steps) {
+        boolean needKeyFrame = true; // start true so first action step gets a keyframe
+        for (DslScene.DslStep step : steps) {
+            if (step.type == null) continue;
+            String t = step.type.toLowerCase(java.util.Locale.ROOT);
+            if ("text".equals(t) || "shared_text".equals(t) || "idle".equals(t)) {
+                needKeyFrame = true;
+            } else {
+                if (needKeyFrame) {
+                    step.attachKeyFrame = true;
+                    needKeyFrame = false;
+                }
+            }
+        }
     }
 
     /** Extract JSON object from LLM response, stripping markdown code fences and surrounding text. */
@@ -515,6 +563,36 @@ public class AiSceneGenerator {
                 ... continue for Y=3, Y=4, Y=5 ...
 
               Then scene segment 2, 3, etc. contain the normal operation/usage tutorial.
+
+              ## MANDATORY: Input/Output Overview Segment
+              The scene segment IMMEDIATELY AFTER the build tutorial MUST be an **Input/Output Overview**. This segment visually demonstrates ALL inputs and outputs of the machine/structure.
+
+              **How to create this segment:**
+              1. Scan ALL input text (user instruction, reference material) and extract every input and output: items, fluids, gases, chemicals, energy, etc.
+              2. For each input/output, identify:
+                 - WHAT substance it is (e.g. steam, water, energy, items)
+                 - WHERE on the structure it enters/exits (which block/port)
+              3. Use show_controls at each port location to display the substance, followed by text explaining it.
+
+              **Pattern for each input/output:**
+              - show_controls position=[port_block_pos] item="substance_name" → idle → text "Input: ..." or "Output: ..." at the same position → idle
+
+              **Example:**
+              Scene segment 2 ("Input/Output Overview" / "输入与输出"):
+                step 1: show_structure
+                step 2: text "This machine has the following inputs and outputs."
+                step 3: idle 60
+                step 4: show_controls position=[valve_pos] item="蒸汽" — show steam input
+                step 5: text "Input: Steam enters through turbine valves" (point at valve_pos)
+                step 6: idle 60
+                step 7: show_controls position=[output_valve_pos] item="能量" — show energy output (use the closest matching item/block)
+                step 8: text "Output: Electrical energy exits through turbine valves" (point at output_valve_pos)
+                step 9: idle 60
+                step 10: show_controls position=[vent_pos] item="水" — show water output
+                step 11: text "Output: Condensed water exits through turbine vents (optional)" (point at vent_pos)
+                step 12: idle 60
+
+              **CRITICAL**: Every show_controls in this segment MUST have an "item" field with the specific substance's display name (the JSON pass will resolve it to registry ID). Try to find the most specific item/fluid/gas — e.g. use "蒸汽" not "气体", use "水" not "液体".
             """;
 
     private static final String EXAMPLE_PLACEHOLDER = "{{EXAMPLE}}";
@@ -601,61 +679,74 @@ public class AiSceneGenerator {
     /** Example for single block / item introduction (buildTutorial=false) */
     private static final String SINGLE_BLOCK_EXAMPLE = """
             ## Example Output
-            Below is a real example showing correct JSON structure for a Botania Endoflame introduction (no build tutorial).
-            Adapt the pattern to your actual block/item.
+            Below is a real example showing correct JSON structure for a Botania Entropinnyum tutorial (no build tutorial).
+            Adapt the pattern to your actual block/item. Pay close attention to how different step types are used for different kinds: set_block for [block], create_entity for [entity], show_controls for player interactions.
             ```json
             {
-              "id": "ponderer:endoflame_tutorial",
-              "items": ["botania:endoflame"],
-              "title": {"en_us": "Endoflame - Mana Generation", "zh_cn": "火红莲 - 魔力生成"},
+              "id": "ponderer:entropinnyum_tutorial",
+              "items": ["botania:entropinnyum"],
+              "title": {"en_us": "Entropinnyum - Explosion to Mana", "zh_cn": "热爆花 - 爆炸转魔力"},
               "structures": ["ponderer:basic"],
               "tags": [],
               "steps": [],
               "scenes": [
                 {
-                  "id": "endoflame_fuel_burning",
-                  "title": {"en_us": "Fuel Burning & Mana Generation", "zh_cn": "燃烧燃料和魔力生成"},
+                  "id": "entropinnyum_introduction",
+                  "title": {"en_us": "Introduction & Setup", "zh_cn": "介绍与设置"},
                   "steps": [
                     {"type": "show_structure", "structure": "ponderer:basic", "attachKeyFrame": true},
-                    {"type": "set_block", "block": "minecraft:grass_block", "blockPos": [4,0,0], "blockPos2": [0,0,4]},
-                    {"type": "set_block", "block": "botania:endoflame", "blockPos": [2,1,2], "attachKeyFrame": true},
-                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame flower generates mana by burning fuel items.", "zh_cn": "火红莲通过燃烧物品产生魔力。"}, "point": [2.5,1.5,2.0], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "replace_blocks", "block": "minecraft:grass_block", "blockPos": [0,0,0], "blockPos2": [4,0,4], "spawnParticles": false},
+                    {"type": "set_block", "block": "botania:entropinnyum", "blockPos": [2,1,2], "attachKeyFrame": true},
                     {"type": "idle", "duration": 60},
-                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,0.0,0.0], "count": 1, "item": "minecraft:coal", "attachKeyFrame": true},
-                    {"type": "text", "duration": 60, "text": {"en_us": "Drop fuel items near the flower. It automatically picks them up and starts burning.", "zh_cn": "将燃料物品放在花附近。它会自动捡起并开始燃烧。"}, "point": [1.5,0.0,2.5], "color": "blue", "placeNearTarget": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Entropinnyum is a generating flower that converts TNT explosions into mana.", "zh_cn": "热爆花是一种产能花，利用TNT爆炸转换成魔力。"}, "point": [2.5,1.5,2.0], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "show_controls", "duration": 40, "point": [2.5,1.5,2.0], "direction": "up", "item": "botania:mana_bottle"},
                     {"type": "idle", "duration": 20},
-                    {"type": "clear_item_entities", "fullScene": true},
-                    {"type": "play_sound", "pitch": 1.0, "sound": "minecraft:block.fire.ambient", "soundVolume": 0.6},
+                    {"type": "text", "duration": 50, "text": {"en_us": "It stores up to 6500 mana maximum, and one TNT explosion fills the entire buffer.", "zh_cn": "最大可储存6500点魔力，1个TNT可以充满。"}, "point": [2.5,1.5,2.0], "color": "blue", "placeNearTarget": true},
                     {"type": "idle", "duration": 60},
-                    {"type": "text", "duration": 50, "text": {"en_us": "Coal burns for about 800 ticks (~40 seconds), generating roughly 1200 mana.", "zh_cn": "煤炭的燃烧耗时为 800 tick，约 40 秒，产生魔力约 1200 mana。"}, "point": [2.5,1.5,2.5], "color": "white", "placeNearTarget": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame has an internal mana buffer of 300 mana maximum.", "zh_cn": "火红莲内部缓存最多 300 mana。"}, "point": [2.5,1.5,2.5], "color": "blue", "placeNearTarget": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "text", "duration": 50, "text": {"en_us": "It must be connected to mana devices to output mana and function properly.", "zh_cn": "它必须连接到魔力设备以输出魔力并正常工作。"}, "point": [0.5,1.0,2.5], "color": "red", "placeNearTarget": true},
-                    {"type": "set_block", "block": "botania:mana_spreader", "blockPos": [1,1,2], "attachKeyFrame": true},
-                    {"type": "set_block", "block": "botania:mana_pool", "blockPos": [0,1,2], "attachKeyFrame": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "text", "duration": 50, "text": {"en_us": "Place a mana pool within the flower's detection range to accept generated mana.", "zh_cn": "在花的检测范围内放置魔力发射器以接收生成的魔力。"}, "point": [1.5,1.0,2.5], "color": "green", "placeNearTarget": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "rotate_camera_y", "degrees": 90, "attachKeyFrame": true},
+                    {"type": "text", "duration": 60, "text": {"en_us": "The Entropinnyum's detection range is 25×33×25 blocks: 12 blocks horizontally and 16 blocks vertically.", "zh_cn": "热爆花的检测范围是25×33×25，水平距离12格，竖直距离16格。"}, "point": [2.5,1.5,2.0], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60}
+                  ]
+                },
+                {
+                  "id": "entropinnyum_tnt_mechanics",
+                  "title": {"en_us": "TNT Detection & Mana Generation", "zh_cn": "TNT检测与魔力生成"},
+                  "steps": [
+                    {"type": "show_structure", "structure": "ponderer:basic", "attachKeyFrame": true},
+                    {"type": "replace_blocks", "block": "minecraft:grass_block", "blockPos": [0,0,0], "blockPos2": [4,0,4], "spawnParticles": false},
+                    {"type": "set_block", "block": "botania:entropinnyum", "blockPos": [2,1,2]},
                     {"type": "idle", "duration": 20},
-                    {"type": "text", "duration": 50, "text": {"en_us": "The operating range is 7×7×7 blocks centered on the flower.", "zh_cn": "工作范围为以花为中心的 7×7×7 区域。"}, "point": [2.5,1.5,2.5], "color": "green", "placeNearTarget": true},
+                    {"type": "set_block", "block": "minecraft:tnt", "blockPos": [1,1,2]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Place TNT within the Entropinnyum's detection range.", "zh_cn": "放置TNT在热爆花的范围内。"}, "point": [2.5,2.0,2.5], "color": "blue", "placeNearTarget": true},
                     {"type": "idle", "duration": 60},
-                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "item": "minecraft:charcoal", "attachKeyFrame": true},
-                    {"type": "text", "duration": 50, "text": {"en_us": "Different fuels have different burn times. Charcoal burns similarly to coal.", "zh_cn": "不同燃料有不同的燃烧耗时。木炭的燃烧时间与煤炭相似。"}, "point": [2.5,2.0,2.5], "color": "green", "placeNearTarget": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "count": 1, "item": "minecraft:coal_block", "attachKeyFrame": true},
-                    {"type": "text", "duration": 60, "text": {"en_us": "Coal blocks burn for ~8000 ticks, generating up to 24000 mana maximum per fuel.", "zh_cn": "煤炭块燃烧耗时约 8000 tick，产生 24000 mana（单个燃料上限）。"}, "point": [2.5,1.5,2.5], "color": "blue", "placeNearTarget": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "clear_item_entities", "fullScene": true},
-                    {"type": "text", "duration": 50, "text": {"en_us": "The Endoflame cannot burn items with container data, such as lava buckets.", "zh_cn": "火红莲不会燃烧有容器数据的物品，如熔岩桶。"}, "point": [2.5,1.5,2.5], "color": "red", "placeNearTarget": true},
-                    {"type": "create_item_entity", "pos": [2.5,2.5,2.5], "motion": [0.0,-0.1,0.0], "count": 1, "item": "minecraft:lava_bucket", "attachKeyFrame": true},
-                    {"type": "idle", "duration": 60},
-                    {"type": "clear_item_entities", "fullScene": true},
-                    {"type": "rotate_camera_y", "degrees": -90, "attachKeyFrame": true},
+                    {"type": "show_controls", "duration": 40, "point": [2.5,2.0,2.5], "direction": "right", "action": "right", "item": "minecraft:flint_and_steel", "attachKeyFrame": true},
                     {"type": "idle", "duration": 20},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Use Flint and Steel to ignite the TNT.", "zh_cn": "用打火石点燃TNT。"}, "point": [2.5,2.0,2.5], "color": "input", "placeNearTarget": true},
+                    {"type": "destroy_block", "blockPos": [1,1,2], "destroyParticles": false},
+                    {"type": "create_entity", "entity": "minecraft:tnt", "pos": [1.5,1.0,2.5]},
+                    {"type": "idle", "duration": 80},
+                    {"type": "indicate_redstone", "blockPos": [2,1,2], "attachKeyFrame": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Entropinnyum absorbs the explosion and converts it into mana.", "zh_cn": "热爆花吸收爆炸并转换成魔力。"}, "point": [2.5,1.5,2.0], "color": "green", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Critical: If the mana buffer has remaining space, the TNT will explode normally without being absorbed.", "zh_cn": "重要：魔力存储有剩余时，TNT将继续爆炸而不被吸收。"}, "point": [2.5,1.5,2.0], "color": "red", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "The Entropinnyum only absorbs TNT explosions. It cannot absorb creeper explosions or other blast effects.", "zh_cn": "热爆花无法吸收苦力怕或其他爆炸效果，只吸收TNT。"}, "point": [2.5,1.5,2.0], "color": "red", "placeNearTarget": true},
+                    {"type": "create_entity", "entity": "minecraft:creeper", "pos": [1.0,1.5,2.5]},
+                    {"type": "idle", "duration": 60},
+                    {"type": "clear_entities", "fullScene": true},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Since version 1.16, TNT duplicators using pistons, slime blocks, or rails are detected and rejected.", "zh_cn": "在1.16版本后，活塞、粘液块、铁轨制造的TNT复制机会被检测到。"}, "point": [2.5,1.5,2.0], "color": "red", "placeNearTarget": true},
+                    {"type": "set_block", "block": "minecraft:slime_block", "blockPos": [1,1,1], "attachKeyFrame": true},
+                    {"type": "set_block", "block": "minecraft:rail", "blockPos": [2,1,1]},
+                    {"type": "set_block", "block": "minecraft:piston", "blockPos": [3,1,1]},
+                    {"type": "idle", "duration": 60},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Detected duplicated TNT yields only 3 mana and causes no block destruction.", "zh_cn": "被检测到的复制TNT只产生3点魔力且不破坏方块。"}, "point": [2.5,1.5,2.0], "color": "red", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
+                    {"type": "destroy_block", "blockPos": [3,1,1]},
+                    {"type": "destroy_block", "blockPos": [2,1,1]},
+                    {"type": "destroy_block", "blockPos": [1,1,1]},
+                    {"type": "text", "duration": 50, "text": {"en_us": "Enchanted Soil has no effect on the Entropinnyum and cannot increase its mana generation.", "zh_cn": "蕴魔土对热爆花无效，无法增加产魔效率。"}, "point": [2.5,1.5,2.0], "color": "red", "placeNearTarget": true},
+                    {"type": "idle", "duration": 60},
                     {"type": "indicate_success", "blockPos": [2,1,2], "attachKeyFrame": true},
-                    {"type": "text", "duration": 60, "text": {"en_us": "Despite being the cheapest active mana generator, Endoflame's efficiency exceeds most passive generators.", "zh_cn": "即使是最廉价的主动产能花，火红莲的效率仍优于大多数被动产能花。"}, "point": [2.5,1.5,2.5], "color": "green", "placeNearTarget": true, "attachKeyFrame": true},
                     {"type": "idle", "duration": 60}
                   ]
                 }
@@ -664,12 +755,12 @@ public class AiSceneGenerator {
             ```
             Note the key patterns in this example:
             - No build tutorial — starts directly with functional demonstration
-            - set_block with blockPos + blockPos2 to replace floor, then set_block to place the target block — adapts ponderer:basic structure for the scene
-            - play_sound to add audio feedback at key moments (fire burning)
-            - Specific numbers in text (800 ticks, 1200 mana, 300 buffer) — focus on KEY NUMBERS for single blocks
-            - create_item_entity + clear_item_entities to show item consumption cycle; short rapid-fire item demos can omit intermediate clear
+            - replace_blocks with blockPos + blockPos2 to replace floor, then set_block to place the target block — adapts ponderer:basic structure for the scene
+            - **Step type matches registry kind**: TNT is [entity/block/item] — first shown as set_block (placed block), then destroy_block + create_entity (ignited TNT entity). Creeper is [entity] → create_entity. Flint and Steel is [item] → show_controls (player interaction). This is the correct pattern: use the FIRST kind tag to choose step type.
+            - show_controls with action="right" and item for player interactions (right-click with flint and steel)
+            - Specific numbers in text (6500 mana, 25×33×25 range) — focus on KEY NUMBERS for single blocks
             - Default idle duration is 60 ticks; text duration is typically 50 ticks
-            - Single scene segment is valid when the content flows naturally without topic resets
+            - Multiple scene segments when content has clear topic transitions
             - zh_cn text is natural Chinese, not translated from English
             """;
 
@@ -698,6 +789,14 @@ public class AiSceneGenerator {
             - Emphasize visual actions over text: set_block, toggle_redstone_power, show_controls, create_item_entity, indicate_success, etc.
             - Keep text steps short (one sentence each) — they annotate what's happening visually
 
+            ## CORE RULE: Faithful to Source Material
+            You MUST only include information that is explicitly stated in the provided inputs (user instruction, reference material, structure info). Do NOT:
+            - Invent facts, numbers, or mechanics not mentioned in the inputs
+            - Add real-world knowledge or analogies (e.g. do NOT compare a turbine to a real power plant)
+            - Speculate about how something works if the reference material doesn't explain it
+            - Add gameplay tips or advice not present in the source material
+            If the inputs don't cover a topic, simply don't include it. The scene should teach exactly what the inputs describe — nothing more, nothing less.
+
             Content focus by subject type:
             - **Single blocks/items**: Focus on FUNCTION and KEY NUMBERS (e.g., generation rate, capacity, burn time). Show core functionality with examples. Operational steps are secondary (e.g., how to place/use it, but don't over-detail).
             - **Machines/multi-block structures**: Focus on OPERATIONAL STEPS (input → processing → output). Show how to use it step-by-step. Technical numbers are secondary (mention key values only if they directly affect the workflow).
@@ -710,44 +809,54 @@ public class AiSceneGenerator {
             - A scene segment is a "page" with its own show_structure + step sequence. Only create a NEW segment when there is a major topic shift or scene reset (e.g. switching from "introduction" to "advanced usage", or resetting the structure to show a different configuration).
             - Do NOT create a new segment for every small idea. Continuous flow within one topic should stay in one segment with many steps.
             - Typical scene: 1-4 segments, each with 8-20+ steps. Avoid many short segments (e.g. 5 segments with 3 steps each). Simple blocks may need only 1-2 segments; complex multiblock machines can justify 3-4 segments.
+            - **Input/Output segment**: If the subject has inputs and/or outputs (items, fluids, gases, energy, etc.), the FIRST content segment (i.e., the first segment for single blocks, or the segment right after the build tutorial for multiblock structures) MUST be an **Input/Output Overview**. Extract ALL inputs and outputs from the reference material, and for each one, use show_controls with the substance's item/fluid/gas display name at the corresponding port/block position, followed by text annotation. This gives the player an immediate visual overview of what goes in and what comes out before diving into details.
             """ + BUILD_TUTORIAL_PLACEHOLDER + """
 
             ## Duration Guidelines
             - Default idle duration: 60 ticks (3 seconds). Use this between most content steps.
             - Default text/show_controls duration: 50 ticks.
-            - Short idle (10-20 ticks) is allowed for rapid consecutive small operations (e.g. between set_block and the text that annotates it, or between show_section_and_merge and its layer text).
+            - Short idle (10-20 ticks) is allowed for rapid consecutive small operations (e.g. between show_section_and_merge and its layer text).
+            - **No idle needed between set_block and the text that immediately annotates it.** The block appears instantly, so the text can follow directly. Pattern: set_block → text → idle 60.
 
             Visual-first ordering:
             - When introducing a block or item, FIRST place it (set_block) or spawn it (create_item_entity), THEN show the text annotation.
-            - Pattern: set_block/create_item_entity → text → idle 60
+            - Pattern: set_block → text → idle 60 (no idle between set_block and text)
 
             ## CRITICAL: Show, Don't Tell
             Ponder scenes are VISUAL DEMONSTRATIONS, not text lectures.
             The player watches a 3D scene — they want to SEE things happen, not just read descriptions.
 
-            **Step 1 — Extract all items**: Before writing the outline, scan ALL input text (user instruction, reference material, structure info) and extract every concrete item mentioned: blocks, items, fluids, gases, chemicals, entities, tools, etc. Then plan to VISUALLY SHOW each extracted item using the appropriate step type:
-            - Blocks → set_block to place them in the scene
-            - Mobs/entities → create_entity to spawn them
-            - Dropped items (fuel, ingredients, products) → create_item_entity to show them
-            - Machine I/O substances (fluids, gases, items piped in/out) → show_controls at the relevant port
-            - Tools/interaction items → show_controls with action
+            **Step 1 — Extract all items**: Before writing the outline, scan ALL input text (user instruction, reference material, structure info) and extract every concrete item mentioned: blocks, items, fluids, gases, chemicals, entities, tools, etc. Plan to VISUALLY SHOW each extracted item in the scene using a concrete step type:
+            - Blocks (things that exist as placed blocks in the world) → use **set_block** to place them
+            - Items (tools, ingredients, craftable things) → use **create_item_entity** to spawn as dropped item, or **show_controls** with action for player interaction
+            - Fluids/chemicals/gases → use **show_controls** pointing at the machine port
+            - Entities → use **create_entity** to spawn them
+            - Player interactions (right-click, left-click) → use **show_controls** with action field
             Only omit an extracted item if you are confident it is irrelevant noise (e.g. unrelated sidebar content from a wiki page). When in doubt, show it.
+            Note: The JSON generation pass will adjust the step type based on the registry mapping's [kind] tag priority. So use your best guess for now — the JSON pass will correct it if needed.
 
             **Step 2 — Visual storytelling rules:**
-            - When mentioning a block/item, SHOW it: use set_block to place it, or create_item_entity to spawn it. Use indicate_redstone for power flows; save indicate_success for major conclusions only.
-            - When explaining a crafting recipe or result, use create_item_entity to spawn the items visually
+            - When mentioning a block/item, SHOW it visually with a concrete step type (set_block, create_item_entity, show_controls, indicate_redstone, etc.). Use indicate_redstone for power flows; save indicate_success for major conclusions only.
             - When explaining player interaction, use show_controls to display the mouse action (left-click, right-click, scroll)
-            - **CRITICAL**: When your text mentions "use [item] with left/right click" (e.g. "右键使用扳手", "left-click with pickaxe"), you MUST use show_controls with BOTH the "action" field ("left"/"right") AND the "item" field set to that item's registry ID. The action field is REQUIRED for player interactions — do NOT omit it.
+            - **CRITICAL**: When your text mentions "use [item] with left/right click" (e.g. "右键使用扳手", "left-click with pickaxe"), you MUST use show_controls with BOTH the "action" field ("left"/"right") AND the "item" field. The action field is REQUIRED for player interactions — do NOT omit it.
             - When explaining redstone mechanics, use toggle_redstone_power to actually toggle levers/lamps/pistons so the player sees the state change
-            - When explaining a building process, use set_block step-by-step to place blocks one at a time or layer by layer, rather than describing it in text
-            - **When a machine inputs/outputs items, fluids, gases, or any substance through a port/pipe/interface** (NOT as a dropped item in the world): use show_controls with the item field set to the substance's registry ID, pointing at the input/output port. Then add a text step labeling it as "Input: ..." or "Output: ...". This covers items inserted into machines, fluids piped in/out, gases (e.g. Mekanism hydrogen/oxygen/steam), chemicals, etc. The show_controls item field supports ALL registry types.
-            - **When items exist physically in the world** (dropped items, items on the ground, items flying out of a machine): use create_item_entity to spawn them, and clear_item_entities to remove them when consumed.
+            - When explaining a building process, place blocks step-by-step or layer by layer, rather than describing it in text
+            - **Machine I/O**: When a machine inputs/outputs substances through a port, use show_controls pointing at the port. Then add a text step labeling it as "Input: ..." or "Output: ...".
+            - **CRITICAL — Text must point at the relevant block**: When a text step describes a specific block or component, its "point" coordinate MUST target that block's position, NOT the center of the structure. Pair the text with a show_controls or indicate_redstone on the SAME block so the player sees the visual indicator AND the text annotation together at that location.
+              Example: "阀门输入水" → show_controls at the valve block (showing water icon) → text at the same valve block position explaining the input.
+              **BAD**: text "阀门输入水" with point=[3.5, 4.5, 3.5] (center of structure, nowhere near the valve)
+              **GOOD**: show_controls at valve [1.0, 2.5, 2.0] showing water → text at [1.0, 2.5, 2.0] "阀门输入水"
+            - **Dropped items**: When items exist physically in the world (dropped items, items on the ground), spawn them visually with create_item_entity, and clean up with clear_item_entities when consumed. The JSON pass will correct the step type based on registry kind tags if needed.
             - Text steps should ANNOTATE what the player is seeing, not replace visual demonstration. Keep text SHORT (one sentence).
-            - A good ratio: for every 1 text step, have at least 1-2 visual action steps (set_block, toggle_redstone_power, create_item_entity, show_controls, etc.)
+            - **HARD RULE — No naked text**: EVERY text step MUST be preceded by (or paired with) a visual action step that shows what the text is describing. A text step that simply appears after idle → text → idle with no visual is FORBIDDEN. If the text mentions an item/block/substance, spawn it (create_item_entity, set_block, create_entity) or point at it (show_controls, indicate_redstone) BEFORE the text. If the text describes a number/stat/property with no physical object, use show_controls pointing at the relevant block with an appropriate item icon.
+              **BAD pattern** (naked text wall):
+              text "最大燃烧耗时16000 tick" → idle → text "产魔速度1.5 mana/tick" → idle → text "最大产魔24000 mana" → idle
+              **GOOD pattern** (every text has a visual):
+              show_controls at flower item="煤块" → text "最大燃烧耗时16000 tick" → idle → indicate_redstone at flower → text "产魔速度1.5 mana/tick" → idle → show_controls at flower item="魔力" → text "最大产魔24000 mana" → idle
             - Use rotate_camera_y when the interesting part is on a different side of the structure
-            - Use destroy_block + set_block pairs to show "replace this block with that block" visually
-            - **Item entity lifecycle**: When showing multiple items in sequence (e.g. different I/O demonstrations), ALWAYS clear_item_entities before spawning the next item. Pattern: create_item_entity → (use it) → clear_item_entities → create_item_entity (next demo) → ... → clear_item_entities (final cleanup)
-            - **show_controls + text explanation pattern**: After a show_controls step, follow with idle → text step explaining what the control does. Pattern: show_controls → idle → text annotation
+            - **Item entity lifecycle**: When showing multiple items in sequence, ALWAYS clean up before spawning the next.
+            - **show_controls + text explanation pattern**: After a show_controls step, follow with idle → text step explaining what the control does.
+            - **show_controls MUST have item**: Every show_controls step MUST specify what item/block to display. When pointing at a block/component, use that block's display name (the JSON pass will resolve it to registry ID). A show_controls without an item displays nothing and is useless. Example: show_controls pointing at electromagnetic coil → item="电磁线圈".
 
             **Bad example** (text-only, avoid this):
             1. show_structure → 2. text "Place a lever on the block" → 3. idle → 4. text "The lever powers the lamp" → 5. idle → 6. text "The lamp turns on"
@@ -757,7 +866,7 @@ public class AiSceneGenerator {
 
             Key constraints to respect in your plan:
             - Floor awareness: read the structure's Y-layer layout to identify the floor Y. Plan set_block placements at floor_Y + 1 or higher — never on the floor itself.
-            - Default structure (ponderer:basic): if no user NBT is provided, plan replace_blocks/set_block steps early to adapt the plain stone platform to the scene's theme.
+            - Default structure (ponderer:basic): if no user NBT is provided, plan replace_blocks/set_block steps early to adapt the plain stone platform to the scene's theme. For example, if demonstrating a flower or plant, replace the floor (or at least the block beneath it) with grass_block; if demonstrating a Nether item, replace with netherrack; if demonstrating an ocean-related item, replace with sand or prismarine, etc. The floor material should visually match the subject.
 
             Available step types:
             show_structure, idle, text, show_controls, play_sound, set_block, destroy_block, replace_blocks,
@@ -765,19 +874,29 @@ public class AiSceneGenerator {
             create_entity, create_item_entity, clear_entities, clear_item_entities, rotate_section, move_section, indicate_redstone,
             indicate_success, encapsulate_bounds, rotate_camera_y
 
-            Coordinate system: X=east(+)/west(-), Y=up(+)/down(-), Z=south(+)/north(-). [0,0,0] = bottom-north-west corner.
+            Coordinate system: X=east(+)/west(-), Y=up(+)/down(-), Z=south(+)/north(-). [0,0,0] = bottom-north-west corner (the corner CLOSEST to the default camera).
 
             ## Camera Awareness
             The default camera looks from the NORTHWEST corner toward the SOUTHEAST.
-            Visible faces: **north face (Z=0)** and **west face (low X / X=0)**.
-            Hidden faces: south face (high Z) and east face (high X).
+            The player sees the **north face (Z=0 side)** and the **west face (X=0 side)** of the structure.
+            The **south face (high Z)** and **east face (high X)** are HIDDEN from view.
 
-            Rules:
-            - Text annotations and key visual actions should target blocks on the VISIBLE side (low Z or low X faces) so the player can actually see them.
-            - If you need to show something on the hidden side (south or east face), FIRST rotate_camera_y to bring that side into view, THEN place text/actions there.
-            - rotate_camera_y positive = clockwise from above. +90° reveals the east face (high X). -90° reveals the south face (high Z). +180° shows the back (southeast corner).
-            - After rotating, remember subsequent text/actions are from the new angle. Rotate back when switching to a different topic if needed.
-            - **Prefer placing annotations and key interactions on the north (Z=0) face** — this is the primary visible face. Only use rotate_camera_y when the relevant blocks are genuinely on the hidden side.
+            **CRITICAL — Annotation Positioning Rules**:
+            1. For show_controls and text "point" coordinates, you MUST target a VISIBLE face of the block.
+               - The VISIBLE face of a block is the face with the LOWEST X or LOWEST Z coordinate.
+               - To target the **north face** (visible) of block [bx, by, bz]: use point [bx+0.5, by+0.5, bz] (Z = integer = north face).
+               - To target the **west face** (visible) of block [bx, by, bz]: use point [bx, by+0.5, bz+0.5] (X = integer = west face).
+               - NEVER use [bx+1, by+0.5, bz+0.5] (east face) or [bx+0.5, by+0.5, bz+1] (south face) — those faces are HIDDEN.
+            2. **Example**: A 7×9×7 structure has a valve at block position [0,2,3].
+               - CORRECT: show_controls position = [0, 2.5, 3.5] — targets the WEST face (X=0, visible).
+               - WRONG: show_controls position = [1, 2.5, 3.5] — targets the EAST face (hidden).
+               Similarly, a valve at [3,2,0]: position = [3.5, 2.5, 0] — targets the NORTH face (Z=0, visible).
+            3. **When choosing which block to annotate**: If multiple equivalent blocks exist (e.g. valves on different faces), ALWAYS pick the one on the NORTH or WEST face (lowest Z or lowest X).
+               - Example: If turbine valves exist at X=0 (west), X=6 (east), Z=0 (north), Z=6 (south) — choose the one at X=0 or Z=0.
+            4. If you MUST annotate a block on the hidden side, insert rotate_camera_y BEFORE the annotation:
+               - +90° reveals the east face (high X). -90° reveals the south face (high Z). +180° shows the back (southeast corner).
+               - After rotating, remember subsequent annotations are from the new angle. Rotate back when done.
+            5. **Default rule**: When no camera rotation has been applied, ALL show_controls and text annotations MUST point to blocks with X=0 or Z=0 face visible. If you find yourself writing a position where both X and Z are interior values and no rotate_camera_y precedes it, you are probably wrong.
 
             At the very end of your response, on its own line, list every block, item, fluid, chemical, entity, and sound you plan to reference:
             REQUIRED_ELEMENTS: <comma-separated list>
@@ -790,6 +909,19 @@ public class AiSceneGenerator {
             - Entities spawned (e.g. minecraft:zombie)
             - Sounds played (e.g. minecraft:block.piston.extend)
             If your outline mentions a machine that processes/inputs/outputs a fluid, gas, or chemical, that substance MUST appear in REQUIRED_ELEMENTS. Missing elements will cause ID resolution to fail silently.
+            **REQUIRED_ELEMENTS naming — THIS IS CRITICAL**:
+            - Look at the reference material and user instruction. If they are in Chinese, ALL element names MUST be in Chinese. If in English, use English.
+            - Use the EXACT display names as they appear in the reference material or game wiki. For example, if the wiki says "活塞", write "活塞", NOT "Piston".
+            - NEVER mix languages: do NOT write English names when the reference material is Chinese. English names will FAIL to resolve to registry IDs on a Chinese game client.
+            - Only use registry ID format (mod:name) for entities (minecraft:zombie), sounds (minecraft:block.piston.extend), and vanilla blocks that have no localized display name in the reference (e.g. minecraft:grass_block).
+            - Example (Chinese context): REQUIRED_ELEMENTS: 活塞, 红石灯, TNT, 打火石, 水, minecraft:grass_block
+            - Example (English context): REQUIRED_ELEMENTS: Piston, Redstone Lamp, TNT, Flint and Steel, Water
+
+            ## Reference Material Coverage
+            When reference material (wiki pages, user notes) is provided, you MUST read ALL sections thoroughly and cover every significant topic in your outline. Do NOT cherry-pick only the basic mechanics — if the reference has sections on advanced usage, edge cases, caveats, historical changes, special interactions, or warnings, you should include them in your scene plan (as text annotations or visual demonstrations).
+            - Scan the entire reference for distinct topics/sections and plan at least one visual step or text annotation for each
+            - Especially do NOT skip: warnings, restrictions, special notes, advanced techniques, version-specific behavior, and interaction caveats
+            - If a reference section is very long and detailed (e.g. multi-version history), summarize the most relevant points for the LATEST version rather than ignoring it entirely
 
             ## Localization Quality Rules
             When generating zh_cn (Chinese) text content:
@@ -797,9 +929,12 @@ public class AiSceneGenerator {
             - **Preserve proper nouns exactly**: Block names, item names, fluid names, chemical names, entity names, and mod names must use their ORIGINAL Chinese display names from the game (e.g. "活塞" not "推动装置", "红石灯" not "由红石供能的灯").
             - If the user prompt or reference material contains Chinese names for blocks/items, use those EXACT names in your text — do NOT paraphrase or re-translate them.
             - Keep text concise and game-appropriate. Use the tone of Minecraft wiki or in-game tutorials, not academic or literary Chinese.
+            - **Do NOT use any emoji** in text content. No ⚠️, ✅, ❌, 🔥, etc. Use plain text only.
 
-            Use display names for blocks/items/fluids/chemicals in the SAME LANGUAGE as the user instruction (e.g. if the user writes Chinese, use "活塞", "红石灯", "水"; if English, use "Piston", "Redstone Lamp", "Water").
-            For modded content you may also use the ID path without namespace (e.g. "endoflame" instead of full "botania:endoflame") — this is more reliable than guessing display names.
+            Use display names for blocks/items/fluids/chemicals in the SAME LANGUAGE as the reference material and user instruction. If the reference wiki page is in Chinese, use Chinese display names everywhere — in outline text, show_controls items, AND REQUIRED_ELEMENTS.
+            **Do NOT use English display names when the reference material is in Chinese** — they will fail registry lookup. For example, if the wiki says "活塞", use "活塞" everywhere, NOT "Piston".
+            **Do NOT use registry IDs (e.g. minecraft:tnt, minecraft:flint_and_steel) for blocks/items in the outline text or REQUIRED_ELEMENTS** — always prefer display names. The registry ID resolution happens automatically in the next step.
+            For modded content whose display name you are unsure of, use the ID path without namespace (e.g. "endoflame" instead of full "botania:endoflame").
             For entities use registry IDs (e.g. "minecraft:zombie", "minecraft:villager").
             For sounds use registry IDs (e.g. "minecraft:block.piston.extend", "minecraft:block.lever.click").
 
@@ -808,6 +943,13 @@ public class AiSceneGenerator {
             - Block state properties or variant selectors (e.g. do NOT write "with endoflame variant" or "type=endoflame")
             - Implementation details about how to achieve a block — just name it (e.g. write "endoflame" not "specialflower with endoflame variant")
             The correct registry IDs will be resolved automatically in the next step. Your job is only to NAME what is needed, not to specify HOW to place it.
+
+            ## SELF-CHECK: Scan for consecutive text walls
+            After writing your complete outline, re-read it and check for **3 or more consecutive text steps** (where text steps are separated only by idle). If you find such a sequence:
+            1. Identify the items/blocks/substances mentioned in each text
+            2. Insert a visual step BEFORE every 2nd text onward: show_controls with the relevant item, create_item_entity, set_block, indicate_redstone, etc.
+            3. Make sure no 3 consecutive text steps remain without a visual step between them
+            This is your LAST step before outputting the outline — do NOT skip it.
             """;
     }
 
@@ -846,7 +988,9 @@ public class AiSceneGenerator {
             **Fields**:
             - structure (string, required): resource id referencing an entry in the top-level "structures" array, e.g. "ponderer:my_build"
             - height (int, optional): if set (≥0), only shows blocks from this Y-layer upward (useful for revealing a build layer by layer). Omit to show the entire structure at once.
+            - scale (float, optional): scene zoom factor. >1 = zoom in (larger), <1 = zoom out (smaller), omit for default (1.0). Useful when the structure is very large and needs to be shown smaller to fit the view.
             **Example**: {"type":"show_structure", "structure":"ponderer:redstone_demo", "attachKeyFrame":true}
+            **Example with scale**: {"type":"show_structure", "structure":"ponderer:large_build", "scale":0.75, "attachKeyFrame":true}
 
             ---
             ### 2. idle
@@ -884,18 +1028,20 @@ public class AiSceneGenerator {
 
             ---
             ### 5. show_controls
-            **Purpose**: Shows an on-screen control hint icon with an optional ingredient display. Has TWO use cases:
+            **Purpose**: Shows an on-screen control hint icon with an ingredient display. Has TWO use cases:
             1. **Player interaction hint**: Show a mouse action (left-click, right-click, scroll) to teach the player how to interact with a block.
             2. **Machine input/output indicator**: Show an item, fluid, or chemical at a machine's port to indicate what goes in/out. In this case, set the "item" field to the substance's registry ID and omit the "action" field.
+            **CRITICAL**: show_controls WITHOUT an "item" field displays NOTHING — it is an empty, invisible indicator. You MUST ALWAYS set the "item" field. When pointing at a block/component, use that block's registry ID as the item. When showing I/O, use the substance's registry ID.
             **When to use**:
             - Teaching player interaction: "right-click this lever", "scroll on the wrench" — you MUST set the "action" field ("left"/"right"/"scroll") AND the "item" field. NEVER omit action for player interaction hints.
             - Showing machine I/O: "this port accepts Water", "this outputs Iron Ingots" — use show_controls with item field pointing at the port block, then follow with a text step labeling it as input/output. Omit "action" field for I/O indicators.
+            - Pointing at a component to explain it: set "item" to that component's registry ID so it displays the block icon. Example: pointing at an electromagnetic coil → item="mekanismgenerators:electromagnetic_coil".
             **Fields**:
             - point (float[3], required): position in the scene where the indicator appears
             - direction (string, required): which side of the point the icon appears. Values: "up", "down", "left", "right"
             - action (string, optional): input type. Values: "left" (left-click), "right" (right-click), "scroll" (scroll wheel). Omit when using as I/O indicator.
             - duration (int, optional, default 40): how long the indicator is shown
-            - item (string, optional): registry ID of any item, fluid, or substance to display. Supports ALL registry types: items (e.g. "minecraft:iron_ingot"), fluids (e.g. "minecraft:water"), modded chemicals (e.g. "mekanism:hydrogen"), etc.
+            - item (string, REQUIRED): registry ID of the item, block, fluid, or substance to display. Supports ALL registry types: items (e.g. "minecraft:iron_ingot"), fluids (e.g. "minecraft:water"), blocks (e.g. "minecraft:lever"), modded chemicals (e.g. "mekanism:hydrogen"), etc. NEVER omit this field — a show_controls without item is invisible and useless.
             - whileSneaking (bool, optional): if true, shows a "while sneaking" modifier
             - whileCTRL (bool, optional): if true, shows a "while holding CTRL" modifier
             **Example (player interaction)**: {"type":"show_controls", "point":[2.5,2.5,3.5], "direction":"down", "action":"right", "duration":40, "item":"minecraft:lever"}
@@ -908,7 +1054,7 @@ public class AiSceneGenerator {
             **Fields**:
             - item (string, required): item id (e.g. "minecraft:diamond", "minecraft:iron_ingot")
             - pos (float[3], required): spawn position (can also use "point" field)
-            - motion (float[3], optional): initial velocity [vx, vy, vz]. In most cases use [0, 0, 0] to spawn the item stationary. Only use non-zero values when you need the item to visually fly/pop (e.g. [0, 0.15, 0] for gentle upward pop).
+            - motion (float[3], REQUIRED): initial velocity [vx, vy, vz]. ALWAYS include this field — omitting it causes items to fly upward uncontrollably. Use [0, 0, 0] for stationary items (most common). Only use non-zero values when you need the item to visually fly/pop (e.g. [0, 0.15, 0] for gentle upward pop).
             - count (int, optional, default 1): number of items to display in the stack
             **Example**: {"type":"create_item_entity", "item":"minecraft:iron_ingot", "pos":[2.5, 2.0, 3.5], "motion":[0, 0, 0]}
 
@@ -1082,26 +1228,39 @@ public class AiSceneGenerator {
 
             ## Coordinate System
             - X: east(+)/west(-), Y: up(+)/down(-), Z: south(+)/north(-)
-            - [0,0,0] is the bottom-north-west corner of the structure
-            - For "point" fields (text, show_controls, entity pos): use float values. Use x.5 to target block centers (e.g. [2.5, 1.5, 3.5] = center of block [2,1,3]). Use integer x/z values to target block faces (e.g. [1.0, 2.5, 2.0] = west face of block [1,2,2]).
+            - [0,0,0] is the bottom-north-west corner of the structure (the corner closest to the camera)
+            - For "point" fields (text, show_controls, entity pos): use float values.
+              - Block center: [bx+0.5, by+0.5, bz+0.5]
+              - **Block face targeting** (for annotations): use an INTEGER value on one axis to select a face:
+                - West face (visible): X = bx (integer), e.g. block [2,1,3] → west face = [2.0, 1.5, 3.5]
+                - North face (visible): Z = bz (integer), e.g. block [2,1,3] → north face = [2.5, 1.5, 3.0]
+                - East face (hidden): X = bx+1 — AVOID unless camera is rotated
+                - South face (hidden): Z = bz+1 — AVOID unless camera is rotated
             - For "blockPos" fields (set_block, destroy_block, etc.): use integer values [x, y, z]
             - All coordinates must be within the structure bounds
 
             ## Camera Awareness
             The default camera looks from the NORTHWEST corner toward the SOUTHEAST.
-            - **Visible faces**: north face (Z=0) and west face (low X / X=0)
-            - **Hidden faces**: south face (high Z) and east face (high X)
-            - Text "point" coordinates should target blocks on the VISIBLE side (low Z or low X). If the outline says to annotate something on the hidden side, insert a rotate_camera_y step BEFORE the text step.
-            - rotate_camera_y: positive degrees = clockwise from above. +90° reveals the east face, -90° reveals the south face, +180° shows the back (southeast).
-            - After rotating, remember subsequent text/actions are from the new angle. Rotate back when switching to a different topic if needed.
-            - **Prefer annotations on the north (Z=0) face** — this is the primary visible face.
+            The player sees the **north face (Z=0 side)** and the **west face (X=0 side)**.
+            The **south face (high Z)** and **east face (high X)** are HIDDEN.
+
+            **CRITICAL — Point Coordinate Rules**:
+            1. For show_controls "position" and text "point", target a VISIBLE face:
+               - North face of block [bx,by,bz]: point = [bx+0.5, by+0.5, bz] (Z = integer = north face, visible).
+               - West face of block [bx,by,bz]: point = [bx, by+0.5, bz+0.5] (X = integer = west face, visible).
+               - NEVER use east face [bx+1, by+0.5, bz+0.5] or south face [bx+0.5, by+0.5, bz+1] — those are HIDDEN.
+            2. **Choose which block to annotate**: If equivalent blocks exist on multiple faces, pick the one at X=0 or Z=0 (visible faces).
+               - Example: valves at X=0, X=6, Z=0, Z=6 → choose X=0 or Z=0 valve.
+            3. If the outline says rotate_camera_y before an annotation, insert the rotation step first, then annotate.
+            4. **Default rule**: Without a preceding rotate_camera_y, ALL show_controls positions and text points MUST have either X as an integer (west face) or Z as an integer (north face). Both X.5 and Z.5 = block center = wrong for annotations.
 
             ## Scene Design Guidelines
             Follow the outline provided — it already contains the scene design plan.
             Your job is to translate the outline into valid JSON, not to redesign the scene.
+            **Faithful to source**: Only include information from the outline and reference material. Do NOT invent facts, add real-world analogies, or include content not present in the inputs. Translate the outline faithfully — do not add extra text steps with information the outline didn't mention.
             Additional formatting rules:
             1. ALWAYS start each scene segment with show_structure
-            2. **Duration guidelines**: Default idle is 60 ticks. Default text/show_controls duration is 50 ticks. Use shorter idles (10-20 ticks) only for rapid consecutive small operations (e.g. between a visual action and its text annotation, or after rotate_camera_y).
+            2. **Duration guidelines**: Default idle is 60 ticks. Default text/show_controls duration is 50 ticks. Use shorter idles (10-20 ticks) only for rapid consecutive small operations (e.g. after rotate_camera_y). **No idle needed between set_block and the text that immediately annotates it** — the block appears instantly, so the text can follow directly: set_block → text → idle 60.
             3. Set placeNearTarget: true on text steps
             4. Use attachKeyFrame: true on important steps
             5. Provide both en_us and zh_cn text in all text steps
@@ -1109,6 +1268,7 @@ public class AiSceneGenerator {
             7. Color conventions: "green" = general info, "red" = warning/important, "blue" = highlight, "input" = player action required
             8. **Item entity lifecycle**: When demonstrating multiple items in sequence, ALWAYS use clear_item_entities before spawning the next. Pattern: create_item_entity → idle → show_controls/text → idle → clear_item_entities → (next create_item_entity or continue). Always clean up with clear_item_entities after the last item demo too.
             9. **show_controls explanation pattern**: After a show_controls step, always follow with idle → text explaining what the control hint means. Never leave show_controls without a follow-up text annotation.
+            10. **Text points to the relevant block**: When a text step describes a specific block or component (e.g. a valve, a coil, a vent), its "point" MUST be at or near that block's position — NOT at the center of the structure. The text should visually appear next to the block it's describing. Pair it with a preceding show_controls or indicate_redstone on the SAME block.
 
             ## Localization Quality Rules
             When writing zh_cn (Chinese) text in text steps:
@@ -1116,6 +1276,7 @@ public class AiSceneGenerator {
             - **Preserve proper nouns exactly**: Use the ORIGINAL Chinese display names from the game for blocks, items, fluids, chemicals, etc. (e.g. "活塞" not "推动装置").
             - If the user prompt or outline contains Chinese names, copy them verbatim into your zh_cn text.
             - Keep text concise and game-appropriate, matching the tone of Minecraft in-game tutorials.
+            - **Do NOT use any emoji** in text content. No ⚠️, ✅, ❌, 🔥, etc. Use plain text only.
 
             ## Important Rules
             - Output ONLY valid JSON. Do NOT wrap it in markdown code fences (no ```json```). No comments, no trailing commas, no explanation text before or after the JSON.
@@ -1124,7 +1285,25 @@ public class AiSceneGenerator {
               - If the mapping says `endoflame → botania:endoflame`, use `"block": "botania:endoflame"` directly.
               - NEVER use a generic parent block + blockProperties/variant to select a sub-type (e.g. do NOT use `"block": "botania:specialflower"` with `"blockProperties": {"type": "endoflame"}`).
               - The mapping is authoritative — it overrides your training knowledge and any suggestions from the outline.
+            - **CRITICAL — Step type selection based on [kind] tag**: The registry mapping labels each ID with one or more kind tags (e.g. [block], [item], [fluid/block], [entity/block/item]). When multiple kinds are listed, they are sorted by priority — the **first kind is the most important** and determines the step type. The outline already specifies visual step types — use the kind tag to VERIFY and CORRECT them:
+              **As part of the world (placing/spawning in the scene) — use the FIRST kind tag:**
+              - First kind is **entity** → use **create_entity** (NOT create_item_entity!) to spawn it
+              - First kind is **block** → use **set_block** to place it as a block
+              - First kind is **item** → use **create_item_entity** to spawn it as a dropped item
+              **CORRECTION EXAMPLE**: If the outline writes `create_item_entity TNT` but registry says `TNT → minecraft:tnt [entity/block/item]`, the first kind is "entity", so you MUST output `{"type": "create_entity", "entity": "minecraft:tnt", ...}` instead of `{"type": "create_item_entity", ...}`. The example scene uses create_item_entity for coal because coal is [item] — do NOT copy that pattern for non-item things.
+              **As machine input/output (showing at a port/interface):**
+              - [item] → use **show_controls** with optional action="left"/"right" (for player interaction like inserting items)
+              - [fluid], [chemical], or any other non-item kind → use **show_controls** WITHOUT action field (just an I/O indicator, no click action)
+              **IMPORTANT**: If the outline uses the wrong step type (e.g. create_item_entity for something whose first kind is entity or block), you MUST correct it based on the first kind tag. But NEVER downgrade a visual step to a text-only step — always keep or improve the visual richness.
+            - **CRITICAL — No naked text**: Every text step MUST be preceded by (or paired with) a visual action step. If the outline has consecutive text → idle → text → idle sequences with no visual steps between them, you MUST insert visual steps: use show_controls to point at relevant blocks with an item icon, use indicate_redstone to highlight components, use create_item_entity to spawn items being discussed, etc. A text step that appears without any preceding visual in the same "block" is FORBIDDEN. When the text describes a stat/number, use show_controls at the relevant block with an appropriate item to give the player something to look at.
             - Screenshots from reference URLs are for understanding the workflow only; use the NBT structure data for accurate block positions
+
+            ## SELF-CHECK: Before outputting the final JSON
+            After composing the complete JSON, mentally scan each scene's steps array for **3 or more consecutive text steps** (where text steps are separated only by idle). If you find such a sequence:
+            1. Extract the item/block/substance mentioned in each text
+            2. Insert a visual step (show_controls with item, create_item_entity, indicate_redstone, etc.) BEFORE every 2nd consecutive text onward
+            3. Ensure no 3 consecutive text steps remain without a visual step between them
+            This self-check overrides the outline — if the outline has text walls, FIX them in the JSON by adding visual steps.
 
             {{EXAMPLE}}
             """;

@@ -47,6 +47,12 @@ public class Config {
                  "WARNING: only enable when using a trusted local proxy.")
         .define("ai.trustAllSsl", false);
 
+    public static final ForgeConfigSpec.BooleanValue AI_WEB_USE_PROXY = BUILDER
+        .comment("Use the AI proxy for web page fetching (reference URLs).",
+                 "When enabled, reference URL requests go through the proxy configured above.",
+                 "When disabled, reference URLs are fetched with a direct connection.")
+        .define("ai.webUseProxy", false);
+
     public static final ForgeConfigSpec.IntValue AI_MAX_TOKENS = BUILDER
         .comment("Maximum number of tokens the LLM can generate per request.",
                  "Increase this if complex scenes are being cut off.",

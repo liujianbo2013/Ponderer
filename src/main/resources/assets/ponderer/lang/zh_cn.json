@@ -115,6 +115,8 @@
   "ponderer.ui.show_structure.height": "高度",
   "ponderer.ui.show_structure.height.hint": "自动",
   "ponderer.ui.show_structure.height.tooltip": "结构显示高度(留空为自动)",
+  "ponderer.ui.show_structure.scale": "缩放",
+  "ponderer.ui.show_structure.scale.tooltip": "场景缩放倍率。>1 放大，<1 缩小，留空为默认(1.0)",
   "ponderer.ui.show_structure.structure": "结构",
   "ponderer.ui.show_structure.structure.hint": "留空=沿用上个；mod:id 或 path",
   "ponderer.ui.show_structure.structure.tooltip": "请直接填写结构 id/路径切换，不支持数字索引；minecraft:* 保存时会自动导入",
@@ -159,6 +161,7 @@
   "ponderer.ui.rotate_camera.degrees": "角度",
   "ponderer.ui.rotate_camera.degrees.unit": "度",
   "ponderer.ui.rotate_camera.degrees.tooltip": "沿Y轴旋转场景视角的角度",
+
   "ponderer.ui.shared_text": "共享文本",
   "ponderer.ui.shared_text.key": "键",
   "ponderer.ui.shared_text.key.hint": "ponderer:my_key",
@@ -508,7 +511,7 @@
   "ponderer.ui.function_page.blueprint_item.tooltip": "配置蓝图载体物品",
   "ponderer.ui.function_page.keybindings.tooltip": "打开 Minecraft 按键设置",
 
-  "ponderer.ui.function_page.ai_generate": "AI 生成",
+  "ponderer.ui.function_page.ai_generate": "AI 生成(Beta)",
   "ponderer.ui.function_page.ai_generate.tooltip": "通过 AI 从 NBT 结构和提示词生成思索场景",
   "ponderer.ui.function_page.ai_config": "AI 配置",
   "ponderer.ui.function_page.ai_config.tooltip": "配置 AI 供应商、API Key 和模型",
@@ -526,10 +529,11 @@
   "ponderer.ui.ai_config.proxy": "代理",
   "ponderer.ui.ai_config.proxy.hint": "地址:端口 (如 127.0.0.1:7890)",
   "ponderer.ui.ai_config.trust_ssl": "信任SSL",
+  "ponderer.ui.ai_config.web_use_proxy": "网页代理",
   "ponderer.ui.ai_config.max_tokens": "最大Token",
   "ponderer.ui.ai_config.max_tokens.hint": "默认 16384",
 
-  "ponderer.ui.ai_generate.title": "AI 场景生成器",
+  "ponderer.ui.ai_generate.title": "AI 场景生成器(Beta)",
   "ponderer.ui.ai_generate.add": "添加",
   "ponderer.ui.ai_generate.delete": "删除",
   "ponderer.ui.ai_generate.select_nbt": "选择 NBT 结构文件",
@@ -549,5 +553,18 @@
   "ponderer.ui.ai_generate.error.no_carrier": "载体物品不能为空",
   "ponderer.ui.ai_generate.error.no_prompt": "提示词不能为空",
   "ponderer.ui.ai_generate.status.generating": "正在生成场景...请稍候",
-  "ponderer.ui.ai_generate.status.success": "场景已生成并保存！执行 /ponderer reload 加载。"
+  "ponderer.ui.ai_generate.status.fetching_web": "正在抓取网页 (1/3)...",
+  "ponderer.ui.ai_generate.status.outline": "正在生成大纲 (2/3)...",
+  "ponderer.ui.ai_generate.status.json": "正在生成 JSON (3/3)...",
+  "ponderer.ui.ai_generate.status.retry": "JSON 解析失败，正在重试 (3/3)...",
+  "ponderer.ui.ai_generate.status.success": "场景已生成并保存！",
+
+  "ponderer.ui.ai_generate.add.tooltip": "从文件选择 NBT 结构",
+  "ponderer.ui.ai_generate.delete.tooltip": "移除当前选中的结构",
+  "ponderer.ui.ai_generate.prev.tooltip": "上一个结构",
+  "ponderer.ui.ai_generate.next.tooltip": "下一个结构",
+  "ponderer.ui.ai_generate.add_url.tooltip": "添加参考网页链接，AI 会抓取内容作为参考",
+  "ponderer.ui.ai_generate.build_tutorial.tooltip": "开启后第一个场景为逐层搭建教程",
+  "ponderer.ui.ai_generate.include_images.tooltip": "开启后会截取参考网页的图片发送给 AI",
+  "ponderer.ui.ai_generate.generate.tooltip": "开始生成思索场景（需要先配置 AI）"
 }

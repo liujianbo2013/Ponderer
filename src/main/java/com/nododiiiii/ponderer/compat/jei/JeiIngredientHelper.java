@@ -96,7 +96,7 @@ final class JeiIngredientHelper {
 
     /**
      * Collect ALL JEI ingredient entries (items, fluids, chemicals, etc.).
-     * Returns a list of {id, displayName, path} string arrays.
+     * Returns a list of {id, displayName, path, kind} string arrays.
      */
     static List<String[]> getAllExtraEntries() {
         IJeiRuntime rt = PondererJeiPlugin.getRuntime();
@@ -110,9 +110,17 @@ final class JeiIngredientHelper {
         return result;
     }
 
+    private static String inferKind(IIngredientType<?> type) {
+        String className = type.getIngredientClass().getSimpleName();
+        if (className.contains("ItemStack")) return "item";
+        if (className.contains("FluidStack")) return "fluid";
+        return className.toLowerCase(Locale.ROOT).replace("stack", "");
+    }
+
     private static <T> void collectEntriesForType(IIngredientManager mgr, IIngredientType<T> type,
                                                     List<String[]> result) {
         IIngredientHelper<T> helper = mgr.getIngredientHelper(type);
+        String kind = inferKind(type);
         Collection<T> allIngredients = mgr.getAllIngredients(type);
         for (T ingredient : allIngredients) {
             ResourceLocation loc = helper.getResourceLocation(ingredient);
@@ -120,7 +128,7 @@ final class JeiIngredientHelper {
             String id = loc.toString();
             String displayName = helper.getDisplayName(ingredient).toLowerCase(Locale.ROOT);
             String path = loc.getPath().toLowerCase(Locale.ROOT);
-            result.add(new String[]{id, displayName, path});
+            result.add(new String[]{id, displayName, path, kind});
         }
     }
 }

@@ -608,6 +608,9 @@ public class DynamicPonderPlugin implements PonderPlugin {
             var selection = scene.getScene().getSceneBuildingUtil().select().everywhere();
             scene.world().showSection(selection, Direction.UP);
         }
+        if (step.scale != null) {
+            scene.scaleSceneView(step.scale);
+        }
     }
 
     private void applyEncapsulateBounds(SceneBuilder scene, DslScene.DslStep step) {

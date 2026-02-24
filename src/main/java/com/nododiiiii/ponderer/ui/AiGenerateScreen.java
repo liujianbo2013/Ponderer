@@ -60,21 +60,24 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
     @Nullable private HintableTextFieldWidget jeiTargetField = null;
 
     // Buttons
-    private record ClickableButton(int x, int y, int w, int h, String label, Runnable action) {}
+    private record ClickableButton(int x, int y, int w, int h, String label, Runnable action, @Nullable String tooltip) {}
     private final List<ClickableButton> clickableButtons = new ArrayList<>();
 
     public AiGenerateScreen() {
         super(Component.translatable("ponderer.ui.ai_generate.title"));
     }
 
+    private static final int LABEL_H = 12;  // height reserved for a label line above a field
+
     private int getWindowHeight() {
         int urlCount = cachedUrlValues.size();
-        return 30 + PREVIEW_H + 6 + ROW_H + 6     // preview + struct buttons
-            + ROW_H + 4                              // carrier
-            + 50 + 4                                  // prompt (multi-line area)
-            + urlCount * ROW_H + ROW_H + 4            // URL fields + add button
-            + ROW_H + 4                               // toggle options row
-            + 12 + 24 + 10;                           // status + generate button
+        return 30 + PREVIEW_H + 6 + ROW_H + 6     // title + preview + struct buttons
+            + FIELD_H + 6                             // carrier (inline label, no separate label row)
+            + LABEL_H + FIELD_H + 4                   // prompt label + field
+            + LABEL_H                                  // "Reference URLs" label
+            + urlCount * ROW_H + ROW_H + 4             // URL fields + add button
+            + ROW_H + 4                                // toggle options row
+            + 12 + 24 + 10;                            // status + generate button
     }
 
     /** Sync all widget values back to the static cache. */
@@ -109,17 +112,21 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
         int btnX = guiLeft + (WIDTH - totalBtnW) / 2;
 
         clickableButtons.add(new ClickableButton(btnX, y, btnW, 16,
-            UIText.of("ponderer.ui.ai_generate.add"), this::addStructure));
+            UIText.of("ponderer.ui.ai_generate.add"), this::addStructure,
+            "ponderer.ui.ai_generate.add.tooltip"));
         btnX += btnW + btnGap;
         clickableButtons.add(new ClickableButton(btnX, y, btnW, 16,
-            UIText.of("ponderer.ui.ai_generate.delete"), this::deleteStructure));
+            UIText.of("ponderer.ui.ai_generate.delete"), this::deleteStructure,
+            "ponderer.ui.ai_generate.delete.tooltip"));
         btnX += btnW + btnGap;
-        clickableButtons.add(new ClickableButton(btnX, y, btnW, 16, "<", this::prevStructure));
+        clickableButtons.add(new ClickableButton(btnX, y, btnW, 16, "<", this::prevStructure,
+            "ponderer.ui.ai_generate.prev.tooltip"));
         btnX += btnW + btnGap;
-        clickableButtons.add(new ClickableButton(btnX, y, btnW, 16, ">", this::nextStructure));
+        clickableButtons.add(new ClickableButton(btnX, y, btnW, 16, ">", this::nextStructure,
+            "ponderer.ui.ai_generate.next.tooltip"));
         y += ROW_H + 4;
 
-        // -- Carrier item --
+        // -- Carrier item (label inline with field) --
         int carrierLabelW = font.width(UIText.of("ponderer.ui.ai_generate.carrier")) + 6;
         int carrierFieldW = fieldW - carrierLabelW;
         boolean hasJei = JeiCompat.isAvailable();
@@ -144,17 +151,19 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
             });
             addRenderableWidget(jeiBtn);
         }
-        y += ROW_H + 2;
+        y += FIELD_H + 6;
 
-        // -- Prompt (tall text field) --
-        promptField = new SoftHintTextFieldWidget(font, fieldX, y, fieldW, 44);
+        // -- Prompt --
+        y += LABEL_H;  // space for label
+        promptField = new SoftHintTextFieldWidget(font, fieldX, y, fieldW, FIELD_H);
         promptField.setHint(UIText.of("ponderer.ui.ai_generate.prompt.hint"));
         promptField.setMaxLength(2048);
         promptField.setValue(cachedPrompt);
         addRenderableWidget(promptField);
-        y += 48;
+        y += FIELD_H + 4;
 
         // -- Reference URLs (starts empty, fully optional) --
+        y += LABEL_H;  // space for "Reference URLs" label
         for (int i = 0; i < cachedUrlValues.size(); i++) {
             int urlFieldW = fieldW - 20;
             HintableTextFieldWidget urlField = new SoftHintTextFieldWidget(font, fieldX, y, urlFieldW, FIELD_H);
@@ -175,17 +184,20 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
 
         // Add URL button
         clickableButtons.add(new ClickableButton(fieldX + 3, y + 1, fieldW - 6, 14,
-            UIText.of("ponderer.ui.ai_generate.add_url"), this::addUrl));
+            UIText.of("ponderer.ui.ai_generate.add_url"), this::addUrl,
+            "ponderer.ui.ai_generate.add_url.tooltip"));
         y += ROW_H + 4;
 
         // -- Toggle options: Build Tutorial | Include Images --
         int toggleW = (fieldW - 6) / 2;
         clickableButtons.add(new ClickableButton(fieldX, y, toggleW, 16,
             UIText.of("ponderer.ui.ai_generate.build_tutorial") + ": " + (cachedBuildTutorial ? "ON" : "OFF"),
-            this::toggleBuildTutorial));
+            this::toggleBuildTutorial,
+            "ponderer.ui.ai_generate.build_tutorial.tooltip"));
         clickableButtons.add(new ClickableButton(fieldX + toggleW + 6, y, toggleW, 16,
             UIText.of("ponderer.ui.ai_generate.include_images") + ": " + (cachedIncludeImages ? "ON" : "OFF"),
-            this::toggleIncludeImages));
+            this::toggleIncludeImages,
+            "ponderer.ui.ai_generate.include_images.tooltip"));
         y += ROW_H + 4;
 
         // -- Status message area --
@@ -195,9 +207,10 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
         int genBtnW = 80;
         clickableButtons.add(new ClickableButton(guiLeft + MARGIN, y, genBtnW, 20,
             cachedGenerating ? UIText.of("ponderer.ui.ai_generate.generating") : UIText.of("ponderer.ui.ai_generate.generate"),
-            this::doGenerate));
+            this::doGenerate,
+            "ponderer.ui.ai_generate.generate.tooltip"));
         clickableButtons.add(new ClickableButton(guiLeft + WIDTH - MARGIN - 60, y, 60, 20,
-            UIText.of("ponderer.ui.function_page.back"), this::goBack));
+            UIText.of("ponderer.ui.function_page.back"), this::goBack, null));
 
         // Focus prompt field
         promptField.setFocused(true);
@@ -356,6 +369,11 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
                 cachedStatusMessage = UIText.of("ponderer.ui.ai_generate.status.success");
                 cachedStatusColor = 0x55FF55;
                 init(minecraft, width, height);
+                var player = Minecraft.getInstance().player;
+                if (player != null) {
+                    player.displayClientMessage(
+                        net.minecraft.network.chat.Component.translatable("ponderer.ui.ai_generate.status.success"), false);
+                }
             },
             error -> {
                 cachedGenerating = false;
@@ -439,19 +457,23 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
         // -- Structure buttons (rendered via clickableButtons) --
         y += ROW_H + 4;
 
-        // -- Carrier label --
+        // -- Carrier label (inline with field) --
         graphics.drawString(font, UIText.of("ponderer.ui.ai_generate.carrier"),
             guiLeft + MARGIN, y + 4, 0xCCCCCC);
-        y += ROW_H + 2;
+        // carrier field is rendered by widget at this y (offset by carrierLabelW)
+        y += FIELD_H + 6;
 
         // -- Prompt label --
         graphics.drawString(font, UIText.of("ponderer.ui.ai_generate.prompt"),
-            guiLeft + MARGIN, y - 10, 0xCCCCCC);
-        y += 48;
+            guiLeft + MARGIN, y, 0xCCCCCC);
+        y += LABEL_H;  // label height
+        // prompt field is rendered by widget at this y
+        y += FIELD_H + 4;
 
         // -- URL label --
         graphics.drawString(font, UIText.of("ponderer.ui.ai_generate.urls"),
-            guiLeft + MARGIN, y - 10, 0xCCCCCC);
+            guiLeft + MARGIN, y, 0xCCCCCC);
+        y += LABEL_H;  // label height
 
         y += cachedUrlValues.size() * ROW_H + ROW_H + 4;
 
@@ -519,6 +541,20 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
             }
         }
 
+        // Button tooltips
+        for (ClickableButton btn : clickableButtons) {
+            if (btn.tooltip != null && mouseX >= btn.x && mouseX < btn.x + btn.w
+                && mouseY >= btn.y && mouseY < btn.y + btn.h) {
+                graphics.pose().pushPose();
+                graphics.pose().translate(0, 0, 100);
+                graphics.renderComponentTooltip(font,
+                    List.of(Component.translatable(btn.tooltip)),
+                    mouseX, mouseY);
+                graphics.pose().popPose();
+                break;
+            }
+        }
+
         graphics.pose().popPose();
     }
 
@@ -540,7 +576,11 @@ public class AiGenerateScreen extends AbstractSimiScreen implements JeiAwareScre
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE)
+            return super.keyPressed(keyCode, scanCode, modifiers);
         if (getFocused() != null && getFocused().keyPressed(keyCode, scanCode, modifiers))
+            return true;
+        if (getFocused() instanceof net.minecraft.client.gui.components.EditBox)
             return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
     }

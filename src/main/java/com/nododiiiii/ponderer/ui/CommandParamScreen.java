@@ -522,11 +522,15 @@ public class CommandParamScreen extends AbstractSimiScreen implements JeiAwareSc
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE)
+            return super.keyPressed(keyCode, scanCode, modifiers);
         if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
             doExecute();
             return true;
         }
         if (getFocused() != null && getFocused().keyPressed(keyCode, scanCode, modifiers))
+            return true;
+        if (getFocused() instanceof net.minecraft.client.gui.components.EditBox)
             return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
     }

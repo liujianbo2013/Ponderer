@@ -207,7 +207,11 @@ public class SceneDescEditorScreen extends AbstractSimiScreen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE)
+            return super.keyPressed(keyCode, scanCode, modifiers);
         if (getFocused() != null && getFocused().keyPressed(keyCode, scanCode, modifiers))
+            return true;
+        if (getFocused() instanceof net.minecraft.client.gui.components.EditBox)
             return true;
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
